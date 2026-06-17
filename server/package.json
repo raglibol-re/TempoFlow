@@ -11,9 +11,9 @@
   "dependencies": {
     "@flow/shared": "workspace:*",
     "@hono/node-server": "^1.13.0",
-    "hono": "^4.6.0",
-    "mppx": "latest",
-    "viem": "^2.21.0"
+    "hono": "^4.12.18",
+    "mppx": "^0.7.0",
+    "viem": "^2.52.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
