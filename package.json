@@ -1,0 +1,21 @@
+{
+  "name": "flow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FLOW — a content feed where money flows in real time: out to creators per second of watchtime, in from advertisers per second of attention. Built on Tempo via MPP.",
+  "type": "module",
+  "scripts": {
+    "dev:server": "pnpm --filter @flow/server dev",
+    "dev:web": "pnpm --filter @flow/web dev",
+    "agent:curator": "pnpm --filter @flow/agent curator",
+    "agent:advertiser": "pnpm --filter @flow/agent advertiser",
+    "wallets:setup": "pnpm --filter @flow/shared wallets:setup",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
