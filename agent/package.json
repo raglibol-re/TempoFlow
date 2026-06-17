@@ -1,0 +1,20 @@
+{
+  "name": "@flow/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "curator": "tsx src/curator.ts",
+    "advertiser": "tsx src/advertiser.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flow/shared": "workspace:*",
+    "mppx": "latest",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
