@@ -15,13 +15,17 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { generate } from "mppx/discovery";
 import { parseUnits } from "viem";
-import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, PRICES } from "@flow/shared";
+import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Readable } from "node:stream";
+import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, PRICES, fundWallet, pathUsdBalance } from "@flow/shared";
 import { mppx, operatorAddress } from "./config.js";
 import { initUsers, users, getUser, publicUser } from "./users.js";
 import {
   initContent,
-  clips,
-  campaigns,
+  getClips,
+  getCampaigns,
   getClip,
   getCampaign,
   addClip,
@@ -29,6 +33,9 @@ import {
 } from "./content.js";
 import * as ledger from "./ledger.js";
 import { runAd, isAdRunning } from "./adrunner.js";
+
+const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
+const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
 
 const app = new Hono();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
