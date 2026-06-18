@@ -1,7 +1,7 @@
 /**
  * TempoFlow — pay-per-second streaming (Twitch/YouTube/DAZN-style).
  * Watch creators (money out/sec), earn from ads (money in/sec), upload videos,
- * run campaigns, admin user management. Log in as a demo account or your own
+ * run campaigns, manage your profile. Log in as a demo account or your own
  * Tempo wallet. ⚠️ TESTNET ONLY.
  */
 import "./styles.css";
@@ -9,11 +9,11 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
-  fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance, fetchAdminUsers,
+  fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, watchClip,
   videoSrc, connectTempoAccount, createCampaign,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  type DemoUser, type AdminUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
+  type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
   type Profile as ProfileData, type PublicUser,
 } from "./flow";
 
@@ -54,7 +54,7 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
 }
 
 // ───────────────────────── login ─────────────────────────
-const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", advertiser: "Advertisers", admin: "Admin" };
+const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", advertiser: "Advertisers" };
 function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: DemoUser) => void; onError: (e: string) => void }) {
   const [key, setKey] = useState(""); const [busy, setBusy] = useState(false);
   const demo = users.filter((u) => u.key && !u.id.startsWith("me-")); // seed accounts only
@@ -72,14 +72,14 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
         <h3 style={{ marginTop: 0 }}>🪪 Log in with your Tempo account</h3>
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste your Tempo <b>testnet</b> private key. One wallet does everything — <b>watch, upload, advertise, earn</b>. (Stored to auto-pay your ads from your wallet. <b>TESTNET ONLY</b> — never a mainnet key.)</div>
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} />
+          <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} autoFocus />
           <button className="btn" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect wallet"}</button>
         </div>
       </div>
 
       <div className="login-card">
         <h3 style={{ marginTop: 0 }}>Or use a demo account</h3>
-        {["viewer", "creator", "advertiser", "admin"].map((r) => {
+        {["viewer", "creator", "advertiser"].map((r) => {
           const us = demo.filter((u) => u.role === r); if (!us.length) return null;
           return (
             <div key={r} style={{ marginBottom: 10 }}>
@@ -98,6 +98,7 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
           );
         })}
       </div>
+      <div className="login-foot">⚠️ Testnet only · no real funds · your key never leaves this demo</div>
     </div>
   );
 }
@@ -521,6 +522,35 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
 }
 
 // ───────────────────────── app ─────────────────────────
+// ───────────────────────── account menu (profile + logout) ─────────────────────────
+function AccountMenu({ me, balance, onProfile, onLogout }: { me: DemoUser; balance: number | null; onProfile: () => void; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="acct">
+      <Avatar user={me} size={34} onClick={() => setOpen((o) => !o)} />
+      {open && (
+        <>
+          <div className="acct-backdrop" onClick={() => setOpen(false)} />
+          <div className="acct-menu">
+            <div className="acct-head">
+              <Avatar user={me} size={42} />
+              <div style={{ minWidth: 0 }}>
+                <div className="acct-name">{me.name}</div>
+                <div className="muted" style={{ fontSize: 12 }}>@{me.handle}</div>
+              </div>
+            </div>
+            <div className="acct-row"><span className="k">wallet</span><span className="tx" title="copy address" onClick={() => copy(me.address)}>{me.address.slice(0, 6)}…{me.address.slice(-4)} ⧉</span></div>
+            <div className="acct-row"><span className="k">balance</span><span><b>{balance != null ? fmtBal(balance) : "…"}</b></span></div>
+            <div className="acct-sep" />
+            <button className="acct-item" onClick={() => { setOpen(false); onProfile(); }}>👤 View profile</button>
+            <button className="acct-item danger" onClick={() => { setOpen(false); onLogout(); }}>⎋ Log out</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
   const [me, setMe] = useState<DemoUser | null>(null);
@@ -538,7 +568,6 @@ function App() {
   const [title, setTitle] = useState(""); const [tags, setTags] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
   // ad studio (advertiser upload)
   const [adTitle, setAdTitle] = useState(""); const [adTags, setAdTags] = useState(""); const [adFile, setAdFile] = useState<File | null>(null); const [adBudget, setAdBudget] = useState("0.20"); const [publishingAd, setPublishingAd] = useState(false); const [fundingAd, setFundingAd] = useState<string | null>(null);
-  const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -575,7 +604,6 @@ function App() {
     catch (e: any) { setError(e?.message ?? String(e)); } setFundingAd(null);
   }
   async function getFunds() { if (!me) return; setFunding(true); try { await fundUser(me.id); setBalance(await fetchBalance(me.id)); } catch (e: any) { setError(e?.message); } setFunding(false); }
-  async function refreshAdmin() { try { setAdmins(await fetchAdminUsers()); } catch (e: any) { setError(e?.message); } }
   async function submitUpload() {
     if (!me || !file || !title.trim()) return; setUploading(true);
     try { await uploadClip(me.id, title.trim(), tags.split(",").map((t) => t.trim()).filter(Boolean), file, 60); setTitle(""); setTags(""); setFile(null); refreshFeed(); }
@@ -593,7 +621,6 @@ function App() {
     ["studio", "Studio"],
     ["earn", "Earn"],
     ["campaigns", "Ads"],
-    ["admin", "Users"],
   ];
   const go = (v: string) => { setView(v); setCurrent(null); };
   const userById = (uid: string) => users.find((u) => u.id === uid);
@@ -607,7 +634,7 @@ function App() {
           <span className="pill"><span className="coin">◎</span> {balance != null ? fmtBal(balance) : "…"}</span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <button className="btn btn-faucet btn-sm" onClick={getFunds} disabled={funding}>{funding ? "funding…" : "🚰 Test funds"}</button>
-          <Avatar user={me} size={34} onClick={() => openProfile(me.id)} />
+          <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onLogout={logout} />
         </div>
       </div>
 
@@ -720,26 +747,8 @@ function App() {
               <div className="receipt" style={{ marginTop: 12 }}>paid to viewers this session (from your wallet): <b>{usd(net?.outUsd ?? 0)}</b></div>
             </>)}
 
-            {view === "admin" && (<>
-              <div className="section-title">Admin — user management</div>
-              <button className="btn" style={{ marginBottom: 14 }} onClick={refreshAdmin}>↻ Load users + balances</button>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {admins.map((u) => (
-                  <div key={u.id} className="urow">
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <Avatar user={u} size={36} onClick={() => openProfile(u.id)} />
-                      <div style={{ minWidth: 0 }}><b className="chan-link" onClick={() => openProfile(u.id)}>{u.name}</b> <span className="role-chip">· {u.role}</span><div className="muted" style={{ fontSize: 11 }}>@{u.handle} · {u.address.slice(0, 10)}…</div></div>
-                    </div>
-                    <div style={{ textAlign: "right" }}><div style={{ fontWeight: 800 }}>{fmtBal(u.balance)}</div>
-                      <button className="btn btn-faucet btn-sm" onClick={async () => { try { await fundUser(u.id); await refreshAdmin(); } catch (e: any) { setError(e?.message); } }}>+ add funds</button></div>
-                  </div>
-                ))}
-                {!admins.length && <div className="muted">Click “Load users + balances”.</div>}
-              </div>
-            </>)}
-
             {/* live receipts */}
-            {view !== "admin" && net && net.events.length > 0 && (
+            {net && net.events.length > 0 && (
               <div className="feed-events" style={{ marginTop: 20 }}>
                 <div className="role-chip">your live receipts · settled on Tempo</div>
                 {net.events.slice(0, 8).map((e) => (

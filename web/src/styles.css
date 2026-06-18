@@ -205,3 +205,24 @@ textarea.input { resize: vertical; font-family: inherit; }
   .phead-cta { flex-direction: row; align-items: center; }
   .pbanner { height: 130px; margin-bottom: -46px; }
 }
+
+
+/* ---- Account menu (logout) ---- */
+.acct { position: relative; }
+.acct-backdrop { position: fixed; inset: 0; z-index: 60; }
+.acct-menu { position: absolute; top: 46px; right: 0; z-index: 61; width: 252px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.55); display: flex; flex-direction: column; gap: 7px; animation: acctpop .12s ease-out; }
+@keyframes acctpop { from { opacity: 0; transform: translateY(-6px); } }
+.acct-head { display: flex; align-items: center; gap: 10px; padding: 4px 4px 9px; border-bottom: 1px solid var(--border); }
+.acct-name { font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 0 4px; }
+.acct-row .k { color: var(--muted); }
+.acct-row .tx { color: var(--accent2); cursor: pointer; font-size: 12px; }
+.acct-row .tx:hover { color: #fff; }
+.acct-sep { height: 1px; background: var(--border); margin: 3px 0; }
+.acct-item { text-align: left; padding: 9px 10px; border-radius: 8px; border: none; background: transparent; color: var(--text); font-weight: 600; font-size: 13.5px; cursor: pointer; }
+.acct-item:hover { background: var(--surface2); }
+.acct-item.danger { color: var(--out); }
+.acct-item.danger:hover { background: rgba(255,93,115,.12); }
+
+/* ---- Login footer ---- */
+.login-foot { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 18px; }
