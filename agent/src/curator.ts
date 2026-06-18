@@ -14,11 +14,11 @@
 import "./env.js";
 import {
   SERVER,
-  requireKey,
   flags,
   makeManager,
   makeLogger,
   discoverOffers,
+  fetchDemoUsers,
   runPaidStream,
   SpendPolicy,
   sleep,
@@ -34,10 +34,14 @@ const MAX_PER_MIN = Number(f.maxPerMinute ?? "0.05");
 const log = makeLogger("curator");
 
 async function main() {
-  const key = requireKey("VIEWER_PRIVATE_KEY");
-  const { account } = makeManager(key); // for address/logging
+  // Act as a real platform user (person). --as <id> selects which.
+  const people = (await fetchDemoUsers()).filter((u) => u.kind === "person");
+  const meId = String(f.as ?? people[0]?.id ?? "");
+  const me = people.find((u) => u.id === meId) ?? people[0];
+  if (!me) throw new Error("no person users on server");
+  const key = me.key;
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
-  log.info(`curator ${account.address} starting`, { budget: BUDGET, watchSecs: WATCH_SECS, prefTags: PREF_TAGS });
+  log.info(`curator acting as ${me.name} (@${me.handle}) ${me.address}`, { budget: BUDGET, watchSecs: WATCH_SECS, prefTags: PREF_TAGS });
 
   // 1) Discover paid endpoints.
   const { serviceInfo, offers } = await discoverOffers();
@@ -58,7 +62,7 @@ async function main() {
   // 3) Earn from ads continuously: send heartbeats so advertisers pay us.
   let earning = true;
   const hb = setInterval(() => {
-    if (earning) for (const c of campaigns) sendHeartbeat(c.id);
+    if (earning) for (const c of campaigns) sendHeartbeat(c.id, me.id);
   }, 1000);
 
   // 4) Watch loop: pay creators per second until the budget is reached.
@@ -84,7 +88,7 @@ async function main() {
     const { manager } = makeManager(key); // fresh channel per clip
     const receipt = await runPaidStream({
       manager,
-      url: `${SERVER}/watch/${clip.id}`,
+      url: `${SERVER}/watch/${clip.id}?as=${me.id}`,
       stopUrl: `${SERVER}/watch/${clip.id}/stop`,
       onFrame: (fr) => {
         if (fr.type !== "tick") return;
@@ -104,8 +108,8 @@ async function main() {
 
   earning = false;
   clearInterval(hb);
-  const net = await fetch(`${SERVER}/net`).then((r) => r.json()).catch(() => null);
-  log.summary({ paidToCreators: policy.spent, viewerNet: net });
+  const net = await fetch(`${SERVER}/net?as=${me.id}`).then((r) => r.json()).catch(() => null);
+  log.summary({ as: me.name, paidToCreators: policy.spent, myNet: net });
   process.exit(0);
 }
 
@@ -114,11 +118,11 @@ function tagScore(clip: Clip, prefs: string[]) {
   return clip.tags.filter((t) => prefs.includes(t)).length;
 }
 
-function sendHeartbeat(campaignId: string) {
+function sendHeartbeat(campaignId: string, viewer: string) {
   fetch(`${SERVER}/heartbeat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ campaignId }),
+    body: JSON.stringify({ campaignId, viewer }),
   }).catch(() => {});
 }
 

@@ -16,11 +16,11 @@
 import "./env.js";
 import {
   SERVER,
-  requireKey,
   flags,
   makeManager,
   makeLogger,
   discoverOffers,
+  fetchDemoUsers,
   runPaidStream,
   SpendPolicy,
 } from "./lib.js";

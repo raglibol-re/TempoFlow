@@ -5,6 +5,7 @@ dist/
 *.log
 logs/
 *.jsonl
+.users.json
 *.sqlite
 *.sqlite-journal
 .wallets/

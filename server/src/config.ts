@@ -36,13 +36,12 @@ export const creatorAccount: Account = privateKeyToAccount(
   requireKey("CREATOR_PRIVATE_KEY"),
 );
 
-/** Address used as the channel operator for Direction B settlements. */
+/**
+ * Address used as the channel OPERATOR for all settlements. Because the server
+ * settles as operator, it can pay out to ANY recipient wallet (any creator or
+ * viewer) without holding their key — this is what enables multi-user.
+ */
 export const operatorAddress = creatorAccount.address;
-
-/** The viewer who RECEIVES ad payments in Direction B (demo: our single viewer). */
-export const viewerAddress = privateKeyToAccount(
-  requireKey("VIEWER_PRIVATE_KEY"),
-).address;
 
 /** viem wallet client for on-chain settlement on the Tempo testnet. */
 export const settlementClient = createWalletClient({

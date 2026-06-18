@@ -2,11 +2,22 @@
 
 export type WalletRole = "viewer" | "creator" | "advertiser";
 
+/** A platform user — a person (watches + posts) or a company (runs ads). */
+export interface User {
+  id: string;
+  name: string;
+  kind: "person" | "company";
+  handle: string; // @handle / channel name
+  avatar: string; // emoji
+  address: `0x${string}`;
+}
+
 /** A creator clip in the feed. */
 export interface Clip {
   id: string;
   title: string;
-  creator: string; // display name
+  creator: string; // display name (channel)
+  ownerId: string; // User.id of the channel owner
   tags: string[];
   durationSec: number;
   /** Recipient wallet(s). One = solo; many = collaboration → split payments. */
@@ -17,7 +28,8 @@ export interface Clip {
 /** An advertiser campaign that pays viewers for attention. */
 export interface Campaign {
   id: string;
-  advertiser: string;
+  advertiser: string; // display name
+  ownerId: string; // User.id of the company
   tags: string[]; // targeting
   pricePerSec: string; // USD paid to the viewer
   maxBudget: string; // USD total campaign budget

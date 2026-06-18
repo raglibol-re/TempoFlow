@@ -119,6 +119,22 @@ export interface Offer {
   intent?: string;
 }
 
+export interface DemoUser {
+  id: string;
+  name: string;
+  kind: "person" | "company";
+  handle: string;
+  avatar: string;
+  address: `0x${string}`;
+  key: `0x${string}`;
+}
+
+/** Fetch the demo users (incl. testnet keys) so an agent can act as one. */
+export async function fetchDemoUsers(): Promise<DemoUser[]> {
+  const j: any = await fetch(`${SERVER}/demo/users`).then((r) => r.json());
+  return j.users ?? [];
+}
+
 export async function discoverOffers(): Promise<{ serviceInfo: any; offers: Offer[] }> {
   const doc: any = await fetch(`${SERVER}/openapi.json`).then((r) => r.json());
   const offers: Offer[] = [];

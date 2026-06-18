@@ -1,11 +1,11 @@
 /**
- * FLOW feed + attention service (MPP server).
+ * FLOW feed + attention service (MPP server) — multi-user (YouTube/Twitch-style).
  *
- * Phase 1: Direction A (Viewer → Creator) end-to-end.
- *   - GET /feed            list clips (free)
- *   - GET /watch/:id       per-second paid SSE session, recipient = creator
+ *  - People watch clips (pay the creator per second) and post their own clips.
+ *  - Companies run ad campaigns that pay viewers per second of proven attention.
+ *  - The server settles every channel as the OPERATOR, so it can pay out to any
+ *    creator/viewer wallet without holding their key.
  *
- * Later phases add /attention/:campaignId (Direction B), /openapi.json, splits.
  * See docs/01-architecture.md and docs/09-api.md.
  */
 
@@ -13,22 +13,25 @@ import "./env.js"; // must be first — loads .env before config/shared
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import {
-  FLOW_CURRENCY,
-  TOKEN_DECIMALS,
-  TEMPO_CHAIN_ID,
-  PRICES,
-} from "@flow/shared";
 import { generate } from "mppx/discovery";
 import { parseUnits } from "viem";
-import { mppx, viewerAddress, operatorAddress, creatorAccount } from "./config.js";
-import { getClip, clips, getCampaign, campaigns } from "./seed.js";
+import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, PRICES } from "@flow/shared";
+import { mppx, operatorAddress } from "./config.js";
+import { initUsers, users, getUser, publicUser } from "./users.js";
+import {
+  initContent,
+  clips,
+  campaigns,
+  getClip,
+  getCampaign,
+  addClip,
+  addCampaign,
+} from "./content.js";
 import * as ledger from "./ledger.js";
 
 const app = new Hono();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Allow the Vite web app (and agents) to call the MPP server cross-origin,
-// including the Payment credential + Payment-Receipt / WWW-Authenticate headers.
 app.use(
   "*",
   cors({
@@ -40,14 +43,8 @@ app.use(
   }),
 );
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Add CORS headers to a raw Response. The global cors() middleware only decorates
- * Hono-native responses; mppx returns plain Response objects (402 challenge, SSE
- * stream, 204 ack) that otherwise reach the browser without Access-Control-* and
- * get blocked as "failed to fetch".
- */
+/** mppx returns raw Response objects; the cors() middleware only decorates
+ * Hono-native ones. Add CORS headers so the browser doesn't see "failed to fetch". */
 function corsify(origin: string | undefined, res: Response): Response {
   res.headers.set("Access-Control-Allow-Origin", origin ?? "*");
   res.headers.set("Access-Control-Expose-Headers", "Payment-Receipt, WWW-Authenticate");
@@ -55,208 +52,151 @@ function corsify(origin: string | undefined, res: Response): Response {
   return res;
 }
 
-/**
- * For management POSTs, forward a body-less request (Authorization only) so mppx
- * classifies it as session management (no spurious charge). See DEV-I in docs/06.
- */
+/** Body-less request for management POSTs so mppx classifies them as management
+ * (no spurious charge). See docs/06 DEV-I. */
 function sessionRequest(c: any): Request {
   const raw = c.req.raw as Request;
   if (c.req.method !== "POST") return raw;
   const auth = c.req.header("authorization");
-  return new Request(raw.url, {
-    method: "POST",
-    headers: auth ? { authorization: auth } : {},
-  });
+  return new Request(raw.url, { method: "POST", headers: auth ? { authorization: auth } : {} });
 }
 
-// Request logger (diagnostics for the voucher loop).
 app.use("*", async (c, next) => {
-  const t = Date.now();
   console.log(`[req] ${c.req.method} ${c.req.path}`);
   await next();
-  console.log(`[req] ${c.req.method} ${c.req.path} -> ${c.res.status} (${Date.now() - t}ms)`);
+  console.log(`[req] ${c.req.method} ${c.req.path} -> ${c.res.status}`);
 });
 
+// ── Read endpoints ──────────────────────────────────────────────────────────
 app.get("/health", (c) => c.json({ ok: true, service: "flow-server" }));
-
+app.get("/users", (c) => c.json({ users: users.map(publicUser) }));
+/** TESTNET ONLY: keys for the local account switcher. */
+app.get("/demo/users", (c) => c.json({ users }));
 app.get("/feed", (c) => c.json({ clips }));
-
-/**
- * Discovery doc — lets agents auto-find FLOW's paid endpoints + their payment
- * terms (x-payment-info) and service metadata (x-service-info).
- * Validate: `npx mppx discover validate http://localhost:3000/openapi.json`.
- */
-const raw = (usd: string) => parseUnits(usd, TOKEN_DECIMALS).toString();
-const openapiDoc = generate(mppx as any, {
-  info: { title: "FLOW", version: "0.1.0" },
-  serviceInfo: {
-    categories: ["media", "attention", "creator-economy"],
-    docs: { homepage: "https://github.com/raglibol-re/TempoFlow" },
-  } as any,
-  routes: [
-    {
-      intent: "tempo/session",
-      method: "get",
-      path: "/watch/{contentId}",
-      summary: "Watch a creator clip; viewer pays per second (recipient = creator).",
-      options: {
-        amount: raw(PRICES.creatorPerSecond),
-        currency: FLOW_CURRENCY,
-        decimals: TOKEN_DECIMALS,
-        unitType: "second",
-        recipient: creatorAccount.address,
-      },
-    },
-    {
-      intent: "tempo/session",
-      method: "get",
-      path: "/attention/{campaignId}",
-      summary: "Sell attention; advertiser pays the viewer per second (recipient = viewer).",
-      options: {
-        amount: raw(PRICES.attentionPerSecond),
-        currency: FLOW_CURRENCY,
-        decimals: TOKEN_DECIMALS,
-        unitType: "second",
-        recipient: viewerAddress,
-      },
-    },
-  ],
+app.get("/campaigns", (c) => c.json({ campaigns }));
+app.get("/net", (c) => {
+  const as = c.req.query("as");
+  const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
+  return c.json(ledger.snapshot(address));
 });
-app.get("/openapi.json", (c) => c.json(openapiDoc));
-
-/**
- * Graceful stop: the viewer "scrolls away". We end the stream generator
- * NORMALLY (not via abort) so Sse.serve emits its final `payment-receipt`,
- * which syncs the client's cumulative to `spent` so close() can settle the
- * exact amount and refund the rest. (Abort would skip the receipt → DEV-I.)
- * Free endpoint (no payment). Keyed by clip id (one active viewer/clip in the demo).
- */
-const stopRequested = new Set<string>();
-app.post("/watch/:id/stop", (c) => {
-  stopRequested.add(c.req.param("id"));
+app.post("/reset", (c) => {
+  ledger.reset();
   return c.json({ ok: true });
 });
 
-/**
- * Direction A: stream a creator clip, charging the viewer pathUSD per second.
- * The viewer is the MPP client (paying); recipient = the clip's creator.
- */
-// GET streams content; POST handles session management (channel open +
-// mid-stream voucher top-ups) — mppx posts vouchers to the same path.
-const SESSION_OPTS = {
-  amount: PRICES.creatorPerSecond,
-  currency: FLOW_CURRENCY,
-  decimals: TOKEN_DECIMALS,
-  unitType: "second",
-  chainId: TEMPO_CHAIN_ID,
-  suggestedDeposit: "0.5",
-} as const;
+// ── Creator / company content management ────────────────────────────────────
+app.post("/clips", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  if (!getUser(b?.as)) return c.json({ error: "unknown user" }, 400);
+  const clip = addClip({
+    ownerId: b.as,
+    title: String(b.title ?? "Untitled"),
+    tags: Array.isArray(b.tags) ? b.tags : String(b.tags ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
+    durationSec: b.durationSec ? Number(b.durationSec) : undefined,
+  });
+  return c.json({ clip });
+});
+app.post("/campaigns", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  if (!getUser(b?.as)) return c.json({ error: "unknown user" }, 400);
+  const campaign = addCampaign({
+    ownerId: b.as,
+    tags: Array.isArray(b.tags) ? b.tags : String(b.tags ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
+    pricePerSec: b.pricePerSec,
+    maxBudget: b.maxBudget,
+  });
+  return c.json({ campaign });
+});
 
+// ── Attention heartbeats (gate input) ───────────────────────────────────────
+const HEARTBEAT_TTL_MS = 2500;
+const lastHeartbeat = new Map<string, number>();
+const hbKey = (campaignId: string, viewer?: string) => `${campaignId}:${viewer ?? "*"}`;
+function attentionFresh(campaignId: string, viewer?: string): boolean {
+  const ts = lastHeartbeat.get(hbKey(campaignId, viewer)) ?? lastHeartbeat.get(hbKey(campaignId));
+  return ts != null && Date.now() - ts <= HEARTBEAT_TTL_MS;
+}
+app.post("/heartbeat", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const campaignId = b?.campaignId ?? c.req.query("campaignId");
+  const viewer = b?.viewer ?? c.req.query("viewer");
+  if (campaignId) lastHeartbeat.set(hbKey(campaignId, viewer), Date.now());
+  return c.json({ ok: true });
+});
+
+// graceful-stop flags (shared by /watch and /attention)
+const stopRequested = new Set<string>();
+app.post("/watch/:id/stop", (c) => (stopRequested.add(c.req.param("id")), c.json({ ok: true })));
+app.post("/attention/:campaignId/stop", (c) => (stopRequested.add(c.req.param("campaignId")), c.json({ ok: true })));
+
+// ── Direction A: watch a creator clip (Viewer → Creator) ────────────────────
 app.on(["GET", "POST"], "/watch/:id", async (c) => {
-  const id = c.req.param("id");
-  const clip = getClip(id);
+  const clip = getClip(c.req.param("id"));
   if (!clip) return c.json({ error: "not found" }, 404);
-
   const origin = c.req.header("origin");
+  const creatorAddr = clip.recipients[0]!.recipient;
 
-  // Gate the request: each tick = one second of watchtime, paid to the creator.
-  const result = await mppx.session(SESSION_OPTS)(sessionRequest(c));
+  const result = await mppx.session({
+    amount: clip.pricePerSec,
+    currency: FLOW_CURRENCY,
+    decimals: TOKEN_DECIMALS,
+    unitType: "second",
+    chainId: TEMPO_CHAIN_ID,
+    recipient: creatorAddr, // pay the clip's creator wallet
+    operator: operatorAddress, // server settles on their behalf
+    suggestedDeposit: "0.5",
+  })(sessionRequest(c));
 
-  // No / invalid credential → 402 challenge (price terms, recipient = creator).
   if (result.status === 402) return corsify(origin, result.challenge);
+  if (c.req.method === "POST") return corsify(origin, result.withReceipt(c.body(null, 204)));
 
-  // Management POST (open / voucher top-up) → 204 ack (carries Payment-Receipt).
-  if (c.req.method === "POST") {
-    return corsify(origin, result.withReceipt(c.body(null, 204)));
-  }
-
-  // GET → stream content, charging one tick per emitted second.
-  stopRequested.delete(clip.id); // fresh watch
+  const viewer = getUser(c.req.query("as") ?? "");
+  const fromAddr = viewer?.address ?? "0xviewer";
+  const fromLabel = viewer?.name ?? "viewer";
+  stopRequested.delete(clip.id);
   const pricePerSec = Number(clip.pricePerSec);
   return corsify(
     origin,
     result.withReceipt(async function* (stream) {
       for (let second = 1; second <= clip.durationSec; second++) {
-        // Graceful stop → return normally so the final receipt is emitted.
         if (stopRequested.has(clip.id)) {
           stopRequested.delete(clip.id);
           return;
         }
-        await stream.charge(); // reserve + commit one tick (auto-pauses if balance low)
-        ledger.addOut(pricePerSec, clip.creator, clip.id); // money OUT → creator
-        yield JSON.stringify({
-          type: "tick",
-          clipId: clip.id,
-          second,
-          spentUsd: +(second * pricePerSec).toFixed(6),
-          creator: clip.creator,
-        });
+        await stream.charge();
+        ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
+        yield JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator });
         await sleep(1000);
       }
     }),
   );
 });
 
-// ─────────────────────────────────────────────────────────────────────────
-// Direction B — Advertising (Advertiser → Viewer, "money IN"), the reversal.
-// The advertiser is the paying client; recipient = the viewer's wallet; the
-// server account acts as channel operator so it can settle to the viewer.
-// Payment is GATED by attention heartbeats: no fresh heartbeat → no charge.
-// ─────────────────────────────────────────────────────────────────────────
-
-const HEARTBEAT_TTL_MS = 2500; // attention considered lost ~2.5s after last beat
-const lastHeartbeat = new Map<string, number>(); // campaignId → ts
-
-function attentionFresh(campaignId: string): boolean {
-  const ts = lastHeartbeat.get(campaignId);
-  return ts != null && Date.now() - ts <= HEARTBEAT_TTL_MS;
-}
-
-app.get("/campaigns", (c) => c.json({ campaigns }));
-app.get("/net", (c) => c.json(ledger.snapshot()));
-app.post("/reset", (c) => {
-  ledger.reset();
-  return c.json({ ok: true });
-});
-
-/** Viewer attention heartbeat (tab visible + ad in viewport). Free endpoint. */
-app.post("/heartbeat", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const campaignId = body?.campaignId ?? c.req.query("campaignId");
-  if (campaignId) lastHeartbeat.set(campaignId, Date.now());
-  return c.json({ ok: true, fresh: campaignId ? attentionFresh(campaignId) : false });
-});
-
-/** Advertiser signals the campaign is done (graceful stop → final receipt). */
-app.post("/attention/:campaignId/stop", (c) => {
-  stopRequested.add(c.req.param("campaignId"));
-  return c.json({ ok: true });
-});
-
+// ── Direction B: advertiser pays a viewer for proven attention ──────────────
 app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
-  const id = c.req.param("id") ?? c.req.param("campaignId");
-  const campaign = getCampaign(id);
+  const campaign = getCampaign(c.req.param("campaignId"));
   if (!campaign) return c.json({ error: "not found" }, 404);
-
   const origin = c.req.header("origin");
+  const toId = c.req.query("to"); // viewer being advertised to
+  const viewer = getUser(toId ?? "");
+  if (!viewer) return c.json({ error: "missing ?to=<viewerId>" }, 400);
 
-  // Advertiser pays per second of PROVEN attention; recipient = the viewer.
   const result = await mppx.session({
     amount: campaign.pricePerSec,
     currency: FLOW_CURRENCY,
     decimals: TOKEN_DECIMALS,
     unitType: "second",
     chainId: TEMPO_CHAIN_ID,
-    recipient: viewerAddress, // money flows IN to the viewer
-    operator: operatorAddress, // server settles on the viewer's behalf
+    recipient: viewer.address, // money flows IN to the viewer
+    operator: operatorAddress,
     suggestedDeposit: "0.5",
   })(sessionRequest(c));
 
   if (result.status === 402) return corsify(origin, result.challenge);
-  if (c.req.method === "POST") {
-    return corsify(origin, result.withReceipt(c.body(null, 204)));
-  }
+  if (c.req.method === "POST") return corsify(origin, result.withReceipt(c.body(null, 204)));
 
+  const company = getUser(campaign.ownerId);
+  const fromAddr = company?.address ?? "0xadvertiser";
   stopRequested.delete(campaign.id);
   const pricePerSec = Number(campaign.pricePerSec);
   const maxBudget = Number(campaign.maxBudget);
@@ -267,21 +207,14 @@ app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
       for (;;) {
         if (stopRequested.has(campaign.id) || paid >= maxBudget) {
           stopRequested.delete(campaign.id);
-          return; // graceful end → final receipt
+          return;
         }
-        if (attentionFresh(campaign.id)) {
-          // Attention proven → advertiser pays the viewer for this second.
+        if (attentionFresh(campaign.id, viewer.id)) {
           await stream.charge();
           paid = +(paid + pricePerSec).toFixed(6);
-          ledger.addIn(pricePerSec, campaign.advertiser, campaign.id); // money IN → viewer
-          yield JSON.stringify({
-            type: "paid",
-            campaignId: campaign.id,
-            paidUsd: paid,
-            advertiser: campaign.advertiser,
-          });
+          ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });
+          yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, advertiser: campaign.advertiser, viewer: viewer.id });
         } else {
-          // Attention lost → DO NOT charge. Nobody pays for ignored ads.
           yield JSON.stringify({ type: "paused", campaignId: campaign.id });
         }
         await sleep(1000);
@@ -290,6 +223,25 @@ app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
   );
 });
 
-const port = Number(process.env.SERVER_PORT ?? 3000);
-serve({ fetch: app.fetch, port });
-console.log(`[flow-server] listening on http://localhost:${port}`);
+async function start() {
+  await initUsers();
+  initContent();
+
+  // Discovery doc (after content exists). recipient is per-content, so omitted.
+  const raw = (usd: string) => parseUnits(usd, TOKEN_DECIMALS).toString();
+  const doc = generate(mppx as any, {
+    info: { title: "FLOW", version: "0.2.0" },
+    serviceInfo: { categories: ["media", "attention", "creator-economy"], docs: { homepage: "https://github.com/raglibol-re/TempoFlow" } } as any,
+    routes: [
+      { intent: "tempo/session", method: "get", path: "/watch/{contentId}", summary: "Watch a creator clip; viewer pays per second (recipient = that clip's creator).", options: { amount: raw(PRICES.creatorPerSecond), currency: FLOW_CURRENCY, decimals: TOKEN_DECIMALS, unitType: "second" } },
+      { intent: "tempo/session", method: "get", path: "/attention/{campaignId}", summary: "Sell attention; advertiser pays the viewer (?to) per second (recipient = viewer).", options: { amount: raw(PRICES.attentionPerSecond), currency: FLOW_CURRENCY, decimals: TOKEN_DECIMALS, unitType: "second" } },
+    ],
+  });
+  app.get("/openapi.json", (c) => c.json(doc));
+
+  const port = Number(process.env.SERVER_PORT ?? 3000);
+  serve({ fetch: app.fetch, port });
+  console.log(`[flow-server] listening on http://localhost:${port} — ${users.length} users, ${clips.length} clips`);
+}
+
+start();

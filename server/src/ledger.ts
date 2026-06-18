@@ -1,62 +1,81 @@
 /**
- * In-memory flow ledger for the viewer's NET balance (demo, single viewer).
+ * Per-address flow ledger (multi-user). Every settled per-second payment is a
+ * flow from one wallet to another. A user's view:
+ *   in  = received (creator watch earnings, or viewer ad earnings)
+ *   out = paid     (viewer watch spend, or company ad spend)
+ *   net = in − out
  *
- *   net = in (from advertisers, Direction B) − out (to creators, Direction A)
- *
- * The narrative: attention to ads finances the creator feed. Persisted only in
- * memory — fine for the hackathon demo (reset on restart / via /reset).
+ * In-memory only — fine for the demo. Reset via /reset.
  */
 
-import type { FlowEvent } from "@flow/shared";
+export interface Flow {
+  id: string;
+  ts: number;
+  fromAddr: string;
+  toAddr: string;
+  fromLabel: string;
+  toLabel: string;
+  amount: number;
+  contentId: string;
+}
 
-let outUsd = 0; // paid to creators
-let inUsd = 0; // received from advertisers
-const events: FlowEvent[] = [];
+const flows: Flow[] = [];
 let seq = 0;
 
-function record(
-  direction: "in" | "out",
-  amount: number,
-  counterparty: string,
-  contentId: string,
-  receiptRef?: string,
-) {
-  events.push({
-    id: `f${++seq}`,
-    direction,
-    amount: amount.toFixed(6),
-    counterparty,
-    contentId,
-    timestamp: Date.now(),
-    receiptRef,
-  });
-  if (events.length > 200) events.shift();
+export function record(f: Omit<Flow, "id" | "ts">) {
+  flows.push({ ...f, id: `f${++seq}`, ts: Date.now() });
+  if (flows.length > 2000) flows.shift();
 }
 
-/** Viewer pays a creator (Direction A). */
-export function addOut(amount: number, creator: string, clipId: string) {
-  outUsd += amount;
-  record("out", amount, creator, clipId);
-}
+const lc = (s: string) => s.toLowerCase();
 
-/** Viewer receives from an advertiser for proven attention (Direction B). */
-export function addIn(amount: number, advertiser: string, campaignId: string) {
-  inUsd += amount;
-  record("in", amount, advertiser, campaignId);
-}
-
-export function snapshot() {
+/** Net view for one address, or global totals if no address given. */
+export function snapshot(address?: string) {
+  if (!address) {
+    const inUsd = flows.reduce((s, f) => s + f.amount, 0);
+    return { inUsd: +inUsd.toFixed(6), outUsd: +inUsd.toFixed(6), netUsd: 0, events: view(flows.slice(-30).reverse()) };
+  }
+  const a = lc(address);
+  let inUsd = 0;
+  let outUsd = 0;
+  const mine: Flow[] = [];
+  for (const f of flows) {
+    if (lc(f.toAddr) === a) {
+      inUsd += f.amount;
+      mine.push(f);
+    } else if (lc(f.fromAddr) === a) {
+      outUsd += f.amount;
+      mine.push(f);
+    }
+  }
   return {
     inUsd: +inUsd.toFixed(6),
     outUsd: +outUsd.toFixed(6),
     netUsd: +(inUsd - outUsd).toFixed(6),
-    events: events.slice(-30).reverse(),
+    events: mine
+      .slice(-30)
+      .reverse()
+      .map((f) => ({
+        id: f.id,
+        direction: lc(f.toAddr) === a ? ("in" as const) : ("out" as const),
+        amount: f.amount.toFixed(6),
+        counterparty: lc(f.toAddr) === a ? f.fromLabel : f.toLabel,
+        contentId: f.contentId,
+      })),
   };
 }
 
+function view(fs: Flow[]) {
+  return fs.map((f) => ({
+    id: f.id,
+    direction: "in" as const,
+    amount: f.amount.toFixed(6),
+    counterparty: `${f.fromLabel} → ${f.toLabel}`,
+    contentId: f.contentId,
+  }));
+}
+
 export function reset() {
-  outUsd = 0;
-  inUsd = 0;
-  events.length = 0;
+  flows.length = 0;
   seq = 0;
 }
