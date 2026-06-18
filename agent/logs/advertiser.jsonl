@@ -312,3 +312,38 @@
 {"t":"2026-06-18T20:25:23.124Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
 {"t":"2026-06-18T20:25:23.125Z","agent":"advertiser","kind":"info","msg":"no attention for 9s — ending campaign"}
 {"t":"2026-06-18T20:25:25.369Z","agent":"advertiser","kind":"summary","paidToViewers":0.008,"txHash":"0x48b000370a887fdcae4566cafdfe0936e010dfbe44819936fd8fd91cb7c9ad65"}
+{"t":"2026-06-18T21:27:21.893Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Vera Holt","budget":1,"targetTags":[]}
+{"t":"2026-06-18T21:27:21.914Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T21:27:21.919Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Vera Holt $0.004/sec for proven attention"}
+{"t":"2026-06-18T21:27:24.704Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:25.820Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:26.940Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:28.062Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:29.181Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:30.408Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:31.530Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:32.653Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:33.771Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:34.892Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:36.118Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:37.243Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:38.359Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:39.481Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:40.594Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:42.038Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:43.146Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:44.271Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:45.374Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:27:46.486Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:28:08.973Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T21:28:09.986Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:10.998Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:12.010Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:13.024Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:14.038Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:15.039Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:16.049Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:17.054Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:18.064Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T21:28:18.066Z","agent":"advertiser","kind":"info","msg":"no attention for 9s — ending campaign"}
+{"t":"2026-06-18T21:28:20.981Z","agent":"advertiser","kind":"summary","paidToViewers":0.084,"txHash":"0x6b1c0e60ed2ee5e6c52718bfb7b505527962f2d052ac57cdab74c19732d80b7e"}
