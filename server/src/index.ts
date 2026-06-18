@@ -19,7 +19,9 @@ import {
   TEMPO_CHAIN_ID,
   PRICES,
 } from "@flow/shared";
-import { mppx, viewerAddress, operatorAddress } from "./config.js";
+import { generate } from "mppx/discovery";
+import { parseUnits } from "viem";
+import { mppx, viewerAddress, operatorAddress, creatorAccount } from "./config.js";
 import { getClip, clips, getCampaign, campaigns } from "./seed.js";
 import * as ledger from "./ledger.js";
 
@@ -78,6 +80,49 @@ app.use("*", async (c, next) => {
 app.get("/health", (c) => c.json({ ok: true, service: "flow-server" }));
 
 app.get("/feed", (c) => c.json({ clips }));
+
+/**
+ * Discovery doc — lets agents auto-find FLOW's paid endpoints + their payment
+ * terms (x-payment-info) and service metadata (x-service-info).
+ * Validate: `npx mppx discover validate http://localhost:3000/openapi.json`.
+ */
+const raw = (usd: string) => parseUnits(usd, TOKEN_DECIMALS).toString();
+const openapiDoc = generate(mppx as any, {
+  info: { title: "FLOW", version: "0.1.0" },
+  serviceInfo: {
+    categories: ["media", "attention", "creator-economy"],
+    docs: { homepage: "https://github.com/raglibol-re/TempoFlow" },
+  } as any,
+  routes: [
+    {
+      intent: "tempo/session",
+      method: "get",
+      path: "/watch/{contentId}",
+      summary: "Watch a creator clip; viewer pays per second (recipient = creator).",
+      options: {
+        amount: raw(PRICES.creatorPerSecond),
+        currency: FLOW_CURRENCY,
+        decimals: TOKEN_DECIMALS,
+        unitType: "second",
+        recipient: creatorAccount.address,
+      },
+    },
+    {
+      intent: "tempo/session",
+      method: "get",
+      path: "/attention/{campaignId}",
+      summary: "Sell attention; advertiser pays the viewer per second (recipient = viewer).",
+      options: {
+        amount: raw(PRICES.attentionPerSecond),
+        currency: FLOW_CURRENCY,
+        decimals: TOKEN_DECIMALS,
+        unitType: "second",
+        recipient: viewerAddress,
+      },
+    },
+  ],
+});
+app.get("/openapi.json", (c) => c.json(openapiDoc));
 
 /**
  * Graceful stop: the viewer "scrolls away". We end the stream generator

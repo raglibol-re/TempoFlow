@@ -133,3 +133,13 @@ local→remote (awaiting user OK; not executed).
   + flow-event feed. All 4 workspaces typecheck; web bundle serves.
 
 **Next:** Phase 3 (scrollable feed + splits + `/openapi.json` discovery), then Phase 4 agents.
+
+## 2026-06-18 (Phase 3 start) — Discovery doc live + validated
+
+- `GET /openapi.json` via mppx `generate(mppx, {info, serviceInfo, routes})`. Both paid
+  endpoints carry `x-payment-info.offers` (raw amounts — note: discovery amounts must be
+  RAW integer units, e.g. "2000" for $0.002 @ 6 decimals, not the decimal string) with
+  currency + recipient + intent, plus root `x-service-info` (categories, docs).
+- **`npx mppx discover validate http://localhost:3000/openapi.json` → "Discovery document
+  is valid."** Agents can now auto-find FLOW's creator + attention endpoints (Phase 4).
+- Remaining Phase 3: multi-clip scrollable feed (P3.1) + collab split payments (P3.2).

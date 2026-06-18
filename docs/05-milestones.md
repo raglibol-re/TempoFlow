@@ -17,9 +17,9 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | P2.1 | `/attention/:campaignId` (recipient=viewer, operator) + heartbeat gate + net ledger | done | attention-spike paid to viewer; gate pauses on attention loss |
 | P2.2 | Scripted advertiser client streams payment | done | `attention-spike.ts`: $0.044 paid, close txHash on-chain |
 | P2.3 | Web: ad card, heartbeats, net-balance rising | done | both-direction UI + net meter + flow feed |
+| P3.3 | `/openapi.json` discovery + `mppx discover validate` | done | "Discovery document is valid." — x-payment-info on /watch + /attention, x-service-info |
 | P3.1 | Scrollable feed, seamless session switch | todo | — |
 | P3.2 | Split payments for collab creators | todo | — |
-| P3.3 | `/openapi.json` discovery + `mppx discover validate` | todo | — |
 | P4.1 | Curator agent autonomous + spend policy + logs | todo | — |
 | P4.2 | Advertiser agent autonomous + budget | todo | — |
 | P4.3 | Curator "leave-it-running" process started | todo | — |
