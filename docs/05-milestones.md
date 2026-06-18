@@ -18,8 +18,8 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | P2.2 | Scripted advertiser client streams payment | done | `attention-spike.ts`: $0.044 paid, close txHash on-chain |
 | P2.3 | Web: ad card, heartbeats, net-balance rising | done | both-direction UI + net meter + flow feed |
 | P3.3 | `/openapi.json` discovery + `mppx discover validate` | done | "Discovery document is valid." — x-payment-info on /watch + /attention, x-service-info |
-| P3.1 | Scrollable feed, seamless session switch | todo | — |
-| P3.2 | Split payments for collab creators | todo | — |
+| P3.1 | Scrollable feed, seamless session switch | done | 3-clip scroll-snap feed; new Watch closes prior channel first |
+| P3.2 | Split payments for collab creators | done (display) | collab clip shows 70/20/10 + per-recipient breakdown on settle; settles to primary on-chain (mppx session has no native splits — DEV-B) |
 | P4.1 | Curator agent autonomous + spend policy + logs | todo | — |
 | P4.2 | Advertiser agent autonomous + budget | todo | — |
 | P4.3 | Curator "leave-it-running" process started | todo | — |

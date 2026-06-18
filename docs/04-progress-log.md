@@ -143,3 +143,17 @@ local→remote (awaiting user OK; not executed).
 - **`npx mppx discover validate http://localhost:3000/openapi.json` → "Discovery document
   is valid."** Agents can now auto-find FLOW's creator + attention endpoints (Phase 4).
 - Remaining Phase 3: multi-clip scrollable feed (P3.1) + collab split payments (P3.2).
+
+## 2026-06-18 (Phase 3 complete) — scrollable feed + collab splits
+
+- **Multi-clip feed (P3.1):** seed now has 3 clips (2 solo + 1 collab). Web is a
+  scroll-snap vertical feed; clicking Watch on a card **seamlessly closes the previously
+  playing channel** (settle + refund) before opening the new one. Active card is highlighted.
+- **Collab splits (P3.2):** the collab clip declares a 70/20/10 split. The UI shows the
+  split and, on settle, the per-recipient breakdown of what was paid. On-chain the channel
+  settles to the primary creator (mppx session has no native per-second splits — see
+  06 ADR-009/DEV-B). All clips settle to the server's single creator wallet (only key held).
+- All 4 workspaces typecheck; `pnpm dev` serves feed (3 clips) + valid `/openapi.json`.
+
+**Phase 3 done.** Next: Phase 4 — autonomous Curator + Advertiser agents (the
+"leave-it-running" wow), using the discovery doc to find content.

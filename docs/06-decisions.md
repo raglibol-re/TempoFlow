@@ -95,6 +95,12 @@ build prompt or from the MPP docs.
 
 ## Still open
 
-- **DEV-B (carry):** per-second session splits vs one-time-charge-only — verify Phase 3.
+- **DEV-B → RESOLVED (with limitation):** mppx 0.7.0 supports `splits` only on the
+  one-time `tempo.charge` path, NOT on the per-second `tempo.session` path (the session
+  request schema has no `splits`). **Decision:** collab clips settle their channel to the
+  primary creator on-chain and the UI displays the intended 70/20/10 split + per-recipient
+  breakdown of what was paid. A real on-chain per-second split would need either mppx
+  session-split support or N parallel channels (one per collaborator). Documented as a
+  known demo limitation. (ADR-009)
 - **DEV-J:** stop flag is keyed by clip id (one active viewer per clip in the demo). For
   multi-viewer, key by channelId/viewer. Fine for Phase 1 demo.
