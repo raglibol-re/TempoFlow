@@ -223,3 +223,34 @@ attention-gated); **companies** get a campaigns view. Money-flow animation + liv
 advertiser agent** as a child process targeting the watching viewer (idle-stops when they leave).
 
 All 4 workspaces typecheck. Operator settlement verified on-chain; multi-creator feed + posting live.
+
+## 2026-06-18 — DB + roles + video + faucet + admin (+ merge-conflict repair)
+
+**Repaired committed merge conflicts.** A git merge left `<<<<<<<`/`>>>>>>>` markers committed
+in 7 files incl. `web/src/main.tsx`, `web/src/flow.ts`, `attention-spike.ts` — that broke the
+build (the real cause of "failed to fetch … again" + the `git-error` file). Resolved all:
+rewrote the source files, kept HEAD for docs. Repo builds clean again.
+
+**Persistence — local SQLite (`node:sqlite`), no Supabase.** `server/src/db.ts` stores users,
+clips (incl. uploaded video path), campaigns in `server/flow.db`. Seeded once on first boot.
+
+**Roles + login.** Users now have a role: viewer / creator / advertiser / admin (9 seeded,
+funded). Web has a **login screen** (pick an account by role) persisted in localStorage;
+role-based dashboards (viewer: Home+Earn; creator: +Studio; advertiser: Campaigns; admin: Users).
+
+**Real video upload + playback.** `POST /clips` accepts multipart (`video` file) → stored under
+`server/uploads/` + path in SQLite; `GET /video/:clipId` streams with **HTTP range** (206) for
+`<video>`. Studio has an upload form. Verified: upload 200 (`hasVideo:true`), range serve 206.
+
+**Payment-gated video.** The `<video>` plays while per-second payment ticks flow; a stall
+detector pauses it (overlay "funding stopped — Get test funds") if ticks stop, and on channel
+close. (To force-demo depletion, lower `maxDeposit`.)
+
+**Faucet + admin.** `POST /demo/fund {userId}` tops up any user via `tempo_fundAddress`; a
+**"Get test funds"** button for the logged-in user. Admin dashboard (`GET /admin/users`) lists
+all users with live on-chain pathUSD balances + per-user "add funds". Verified working.
+
+**Fancy money-flow.** Replaced the CSS lane with a `<canvas>` particle stream (glowing dots,
+directional: red → creator / green ← advertiser), intensity tied to live payment activity.
+
+All 4 workspaces typecheck; server boots with SQLite; endpoints + upload/serve verified.

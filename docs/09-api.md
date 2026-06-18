@@ -10,24 +10,29 @@
 | `/health` | GET | free | — | none | no |
 | `/watch/:contentId` | GET (SSE) + POST | `$0.002`/sec (`tempo` session) | **Creator** | 402 challenge → channel open → per-sec vouchers. GET streams; POST = voucher/open management (same path, forwarded body-less) | yes (`x-payment-info`) |
 | `/watch/:contentId/stop` | POST | free | — | graceful stop: ends the stream so the final receipt is emitted (enables clean close + refund) | no |
-| `/attention/:campaignId` | GET (SSE) + POST | `$0.004`/sec (`tempo` session) | **Viewer** | 402 → channel open (server = operator) → per-sec vouchers, **charged only while heartbeat is fresh (TTL 2.5s)**. GET streams `paid`/`paused` frames; POST = voucher management | yes (`x-payment-info`) |
-| `/attention/:campaignId/stop` | POST | free | — | graceful stop (final receipt → clean close) | no |
+| `/attention/:campaignId/:viewerId` | GET (SSE) + POST | `$0.004`/sec (`tempo` session) | **Viewer** | 402 → channel open (server = operator, recipient = viewer in PATH so it survives voucher-POST query-strip) → per-sec vouchers, **charged only while heartbeat is fresh (TTL 2.5s)** | yes (`x-payment-info`) |
+| `/attention/:campaignId/:viewerId/stop` | POST | free | — | graceful stop (final receipt → clean close) | no |
 | `/heartbeat` | POST | free | — | `{campaignId, viewer}` → marks that viewer's attention fresh (gate input) | no |
 | `/feed` | GET | free | — | list clips (all channels) | no |
 | `/campaigns` | GET | free | — | list ad campaigns | no |
-| `/users` | GET | free | — | public user list (no keys) | no |
-| `/demo/users` | GET | free | — | **TESTNET demo only**: users incl. keys (account switcher) | no |
-| `/clips` | POST | free | — | `{as, title, tags, durationSec}` → creator posts a clip | no |
+| `/users` | GET | free | — | public user list (no keys) — roles: viewer/creator/advertiser/admin | no |
+| `/demo/users` | GET | free | — | **TESTNET demo only**: users incl. keys (login) | no |
+| `/clips` | POST | free | — | JSON `{as,title,tags}` OR **multipart** (`as,title,tags,durationSec,video`=file) → creator posts/uploads a clip | no |
+| `/video/:clipId` | GET | free | — | streams the uploaded video file with **HTTP range** support (for `<video>`) | no |
+| `/demo/fund` | POST | free | — | `{userId}` → faucet test funds to that user's wallet (returns balance) | no |
+| `/admin/users` | GET | free | — | all users + live on-chain pathUSD balances (admin dashboard) | no |
 | `/campaigns` | POST | free | — | `{as, tags}` → company creates a campaign | no |
 | `/demo/run-ad` | POST | free | — | `{campaignId, viewerId}` → spawns the advertiser agent to pay that viewer (in-browser ad demo) | no |
 | `/net` | GET | free | — | `?as=<userId>` or `?address=` → that wallet's `{inUsd,outUsd,netUsd,events[]}` | no |
 | `/reset` | POST | free | — | clear the in-memory net ledger (demo) | no |
 | `/openapi.json` | GET | free | — | discovery doc (validated) | self |
 
-**Multi-user model:** the server settles every channel as the **operator**, so it pays out
-to any creator/viewer wallet. `/watch/:id?as=<viewerId>` pays the clip's creator; recipient
-is that clip's owner. `/attention/:campaignId?to=<viewerId>` pays that viewer; the company
-(campaign owner) is the payer.
+**Multi-user model:** persistence is local **SQLite** (`node:sqlite`, `server/flow.db`) — no
+Supabase. Roles: viewer/creator/advertiser/admin. The server settles every channel as the
+**operator**, so it pays out to any creator/viewer wallet. `/watch/:id?as=<viewerId>` pays the
+clip's creator; `/attention/:campaignId/:viewerId` pays that viewer (company = payer). Uploaded
+videos are stored on disk (`server/uploads/`) + path in SQLite, served at `/video/:clipId`.
+The web `<video>` is **payment-gated**: it pauses if the per-second payment stops.
 
 ## Heartbeat payload
 ```jsonc
