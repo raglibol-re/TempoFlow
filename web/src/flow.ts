@@ -112,18 +112,16 @@ export const fetchNet = (as: string) => jget(`/net?as=${as}`, "load balance") as
 export const fetchBalance = (as: string) => jget(`/balance?as=${as}`, "load wallet").then((j) => (j.balance ?? 0) as number);
 
 /** Log in with your own Tempo wallet (testnet private key → registered + usable).
- *  viewer/creator: the key stays in the browser. advertiser: the key is sent to
- *  the server too, because the ad model auto-pays viewers FROM the advertiser
- *  wallet (server-spawned payer). ⚠️ TESTNET ONLY. */
-export async function connectTempoAccount(privateKey: string, role: "viewer" | "creator" | "advertiser" = "creator"): Promise<DemoUser> {
+ *  Full access: watch, create + upload, launch ads, earn. The key is kept in the
+ *  browser (to pay creators) AND stored server-side (so the app can auto-pay your
+ *  ads from your wallet). ⚠️ TESTNET ONLY. */
+export async function connectTempoAccount(privateKey: string): Promise<DemoUser> {
   const key = (privateKey.trim().startsWith("0x") ? privateKey.trim() : "0x" + privateKey.trim()) as `0x${string}`;
   let address: `0x${string}`;
   try { address = privateKeyToAccount(key).address; } catch { throw new Error("invalid private key"); }
-  const body: any = { address, role, name: role === "advertiser" ? "My Ad Account" : "My Tempo Account", handle: `you-${address.slice(2, 6)}` };
-  if (role === "advertiser") body.key = key; // app pays from your wallet automatically
-  const reg = await jpost("/users", body, "register account");
+  const reg = await jpost("/users", { address, key, name: "My Wallet", handle: `you-${address.slice(2, 6)}` }, "register account");
   const u = reg.user;
-  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? (role === "advertiser" ? "📣" : "🪪"), address, key };
+  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? "🪪", address, key };
 }
 
 /** Advertiser uploads an ad (video + funded budget). */

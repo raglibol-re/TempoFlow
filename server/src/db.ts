@@ -29,12 +29,22 @@ db.exec(`
     id TEXT PRIMARY KEY, advertiser TEXT, ownerId TEXT, title TEXT, tags TEXT,
     pricePerSec TEXT, maxBudget TEXT, hasVideo INTEGER, videoPath TEXT, thumb TEXT
   );
+  -- Pay-to-follow (super-follow): one row per (follower → creator) bond, with the
+  -- on-chain payment that bought it. ⚠️ TESTNET pathUSD.
+  CREATE TABLE IF NOT EXISTS follows (
+    follower TEXT, creator TEXT, amountUsd TEXT, txHash TEXT, createdAt INTEGER,
+    PRIMARY KEY (follower, creator)
+  );
 `);
 
 // Migrate pre-existing DBs (added ad-video + funding columns). Each ALTER throws
 // if the column already exists — ignore that.
 for (const col of ["title TEXT", "hasVideo INTEGER DEFAULT 0", "videoPath TEXT", "thumb TEXT"]) {
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN ${col}`); } catch { /* already present */ }
+}
+// Profile columns on users (creator-platform fields). Same ignore-if-exists migrate.
+for (const col of ["bio TEXT", "pic TEXT", "banner TEXT", "followPrice TEXT"]) {
+  try { db.exec(`ALTER TABLE users ADD COLUMN ${col}`); } catch { /* already present */ }
 }
 
 export interface DbUser {

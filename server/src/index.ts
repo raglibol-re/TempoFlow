@@ -179,20 +179,19 @@ app.post("/demo/fund", async (c) => {
   }
 });
 /** Register a connected Tempo account (login with your own wallet).
- *  - viewer/creator: ADDRESS ONLY — the private key stays in the browser (they
- *    sign their own payments); the server just needs the address.
- *  - advertiser: the ad model REQUIRES the app to pull funds from the advertiser's
- *    wallet automatically (server-spawned payer), so an advertiser may submit its
- *    TESTNET key, stored server-side for that purpose. ⚠️ TESTNET ONLY. */
+ *  Every connected wallet is FULL-ACCESS — it can watch, create + upload, launch
+ *  ads, and earn from ads. Launching ads needs the app to pay viewers FROM the
+ *  wallet automatically (a server-spawned payer), so the wallet's TESTNET key is
+ *  stored server-side for that purpose. ⚠️ TESTNET ONLY — never a mainnet key. */
 app.post("/users", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const address = String(b?.address ?? "");
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return c.json({ error: "bad address" }, 400);
-  const role = ["viewer", "creator", "advertiser"].includes(b?.role) ? b.role : "creator";
+  const role = ["viewer", "creator", "advertiser", "admin"].includes(b?.role) ? b.role : "creator";
   const id = `me-${address.slice(2, 10).toLowerCase()}`;
-  // Only advertisers persist a key (needed for automatic wallet-funded ad payouts).
-  const key = (role === "advertiser" && typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : "";
-  const user = { id, name: String(b?.name ?? "My Tempo Account"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: role === "advertiser" ? "📣" : "🪪", address: address as `0x${string}`, key: key as `0x${string}` };
+  // Store the key whenever a valid one is provided (enables wallet-funded ad payouts).
+  const key = (typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : "";
+  const user = { id, name: String(b?.name ?? "My Wallet"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: "🪪", address: address as `0x${string}`, key: key as `0x${string}` };
   userInsert(user);
   reloadUsers();
   return c.json({ user: publicUser(user) });

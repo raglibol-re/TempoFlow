@@ -54,11 +54,11 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
 // ───────────────────────── login ─────────────────────────
 const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", advertiser: "Advertisers", admin: "Admin" };
 function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: DemoUser) => void; onError: (e: string) => void }) {
-  const [key, setKey] = useState(""); const [role, setRole] = useState<"viewer" | "creator" | "advertiser">("creator"); const [busy, setBusy] = useState(false);
-  const demo = users.filter((u) => u.key); // exclude registered external accounts (no key here)
+  const [key, setKey] = useState(""); const [busy, setBusy] = useState(false);
+  const demo = users.filter((u) => u.key && !u.id.startsWith("me-")); // seed accounts only
   async function connect() {
     if (!key.trim()) return; setBusy(true);
-    try { onLogin(await connectTempoAccount(key, role)); } catch (e: any) { onError(e?.message ?? String(e)); }
+    try { onLogin(await connectTempoAccount(key)); } catch (e: any) { onError(e?.message ?? String(e)); }
     setBusy(false);
   }
   return (
@@ -68,17 +68,10 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
 
       <div className="login-card">
         <h3 style={{ marginTop: 0 }}>🪪 Log in with your Tempo account</h3>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste your Tempo <b>testnet</b> private key — it stays in your browser (never sent to the server). Don't use a mainnet key.</div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste your Tempo <b>testnet</b> private key. One wallet does everything — <b>watch, upload, advertise, earn</b>. (Stored to auto-pay your ads from your wallet. <b>TESTNET ONLY</b> — never a mainnet key.)</div>
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
           <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} />
-          <div className="row">
-            <select className="input" value={role} onChange={(e) => setRole(e.target.value as any)} style={{ flex: 1 }}>
-              <option value="creator">as Creator (watch + upload + earn)</option>
-              <option value="viewer">as Viewer (watch + earn)</option>
-              <option value="advertiser">as Advertiser (run ads — pays from your wallet)</option>
-            </select>
-            <button className="btn" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect"}</button>
-          </div>
+          <button className="btn" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect wallet"}</button>
         </div>
       </div>
 
@@ -367,7 +360,7 @@ function App() {
 
   useEffect(() => {
     if (!me) return;
-    setView(me.role === "advertiser" ? "campaigns" : me.role === "admin" ? "admin" : "home");
+    setView("home");
     const tick = () => {
       fetchNet(me.id).then(setNet).catch(() => {});
       fetchBalance(me.id).then(setBalance).catch(() => {});
@@ -401,13 +394,14 @@ function App() {
   const myClips = feed.filter((c) => c.ownerId === me.id);
   const myAds = campaigns.filter((c) => c.ownerId === me.id);
   const activeAd = adCampaign ? campaigns.find((c) => c.id === adCampaign) ?? null : null;
-  const person = me.role === "viewer" || me.role === "creator";
-  const nav: [string, string][] = [];
-  if (person || me.role === "advertiser") nav.push(["home", "Home"]);
-  if (me.role === "creator") nav.push(["studio", "Studio"]);
-  if (person) nav.push(["earn", "Earn"]);
-  if (me.role === "advertiser") nav.push(["campaigns", "Campaigns"]);
-  if (me.role === "admin") nav.push(["admin", "Users"]);
+  // Every logged-in wallet is full-access: watch, create + upload, advertise, earn.
+  const nav: [string, string][] = [
+    ["home", "Home"],
+    ["studio", "Studio"],
+    ["earn", "Earn"],
+    ["campaigns", "Ads"],
+    ["admin", "Users"],
+  ];
   const go = (v: string) => { setView(v); setCurrent(null); };
 
   return (
