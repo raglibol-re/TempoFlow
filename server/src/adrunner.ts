@@ -14,6 +14,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getUser } from "./users.js";
 import { getCampaign } from "./content.js";
+import * as ledger from "./ledger.js";
 
 const agentDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../agent");
 const procs = new Map<string, ChildProcess>();
@@ -30,11 +31,18 @@ export function runAd(campaignId: string, viewerId: string) {
   const company = campaign ? getUser(campaign.ownerId) : undefined;
   if (!campaign || !viewer || !company) return;
 
-  console.log(`[adrunner] spawning advertiser: ${company.name} → ${viewer.name} (${campaign.id})`);
+  // Only pay what's still funded (committed budget − already paid out).
+  const remaining = Math.max(0, +(Number(campaign.maxBudget) - ledger.spentOn(campaign.id)).toFixed(6));
+  if (remaining < Number(campaign.pricePerSec)) {
+    console.log(`[adrunner] ${campaign.id} is unfunded (remaining $${remaining}) — not spawning payer`);
+    return;
+  }
+
+  console.log(`[adrunner] spawning advertiser: ${company.name} → ${viewer.name} (${campaign.id}, budget $${remaining})`);
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
   const child = spawn(
     npx,
-    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--idleStop", "9000", "--budget", campaign.maxBudget],
+    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--idleStop", "9000", "--budget", String(remaining)],
     { cwd: agentDir, env: process.env, stdio: ["ignore", "pipe", "pipe"], shell: true },
   );
   procs.set(key, child);

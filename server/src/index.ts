@@ -328,7 +328,7 @@ app.post("/campaigns/:id/fund", async (c) => {
   let balance = 0;
   let tx: string | undefined;
   if (company) {
-    try { tx = await fundWallet(company.address, "5"); } catch { /* faucet busy — budget still raised */ }
+    try { tx = (await fundWallet(company.address, "5")) ?? undefined; } catch { /* faucet busy — budget still raised */ }
     try { balance = await pathUsdBalance(company.address); } catch { /* ignore */ }
   }
   const maxBudget = fundCampaign(id, addUsd);
@@ -444,21 +444,41 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
   const fromAddr = company?.address ?? "0xadvertiser";
   stopRequested.delete(stopKey);
   const pricePerSec = Number(campaign.pricePerSec);
-  const maxBudget = Number(campaign.maxBudget);
+  const budget = Number(campaign.maxBudget);
   return corsify(
     origin,
     result.withReceipt(async function* (stream) {
+      // ── Funding gate ──────────────────────────────────────────────────────
+      // The ad pays the viewer FROM THE ADVERTISER'S WALLET. It can only pay if
+      // (a) there's committed budget left, and (b) the advertiser wallet holds
+      // enough pathUSD. Either failing → pay nothing (channel refunds in full).
+      if (campaignRemaining(campaign) < pricePerSec) {
+        yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "budget" });
+        return;
+      }
+      let advBalance = Number.POSITIVE_INFINITY;
+      try { if (company) advBalance = await pathUsdBalance(company.address); } catch { /* RPC hiccup → trust the channel */ }
+      if (advBalance < pricePerSec) {
+        yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "wallet" });
+        return;
+      }
+
       let paid = 0;
       for (;;) {
-        if (stopRequested.has(stopKey) || paid >= maxBudget) {
+        if (stopRequested.has(stopKey)) {
           stopRequested.delete(stopKey);
           return;
         }
+        // Cumulative funded-budget cap (shared across all viewers/sessions).
+        if (campaignRemaining(campaign) < pricePerSec) {
+          yield JSON.stringify({ type: "budget-exhausted", campaignId: campaign.id, paidUsd: paid });
+          return;
+        }
         if (attentionFresh(campaign.id, viewer.id)) {
-          await stream.charge();
+          await stream.charge(); // pulls pathUSD from the advertiser's channel/wallet
           paid = +(paid + pricePerSec).toFixed(6);
           ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });
-          yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, advertiser: campaign.advertiser, viewer: viewer.id });
+          yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, remainingUsd: campaignRemaining(campaign), advertiser: campaign.advertiser, viewer: viewer.id });
         } else {
           yield JSON.stringify({ type: "paused", campaignId: campaign.id });
         }

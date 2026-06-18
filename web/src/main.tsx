@@ -10,8 +10,8 @@ import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance, fetchAdminUsers,
-  fundUser, resetNet, sendHeartbeat, runAd, createCampaign, uploadClip, watchClip,
-  videoSrc, connectTempoAccount,
+  fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, watchClip,
+  videoSrc, connectTempoAccount, createCampaign,
   type DemoUser, type AdminUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
 } from "./flow";
 
@@ -52,7 +52,7 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
 // ───────────────────────── login ─────────────────────────
 const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", advertiser: "Advertisers", admin: "Admin" };
 function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: DemoUser) => void; onError: (e: string) => void }) {
-  const [key, setKey] = useState(""); const [role, setRole] = useState<"viewer" | "creator">("creator"); const [busy, setBusy] = useState(false);
+  const [key, setKey] = useState(""); const [role, setRole] = useState<"viewer" | "creator" | "advertiser">("creator"); const [busy, setBusy] = useState(false);
   const demo = users.filter((u) => u.key); // exclude registered external accounts (no key here)
   async function connect() {
     if (!key.trim()) return; setBusy(true);
@@ -73,6 +73,7 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
             <select className="input" value={role} onChange={(e) => setRole(e.target.value as any)} style={{ flex: 1 }}>
               <option value="creator">as Creator (watch + upload + earn)</option>
               <option value="viewer">as Viewer (watch + earn)</option>
+              <option value="advertiser">as Advertiser (run ads — pays from your wallet)</option>
             </select>
             <button className="btn" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect"}</button>
           </div>
@@ -214,6 +215,89 @@ function WatchView({ clip, me, onBack, onError, onSettled }: { clip: Clip; me: D
   );
 }
 
+// ───────────────────────── ad watch (earn) ─────────────────────────
+/** Watch a red-framed ad video and get PAID per second of proven attention.
+ *  The money is pulled automatically from the advertiser's wallet (server-spawned
+ *  payer); when the ad's funded budget runs out it simply stops paying. */
+function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () => void }) {
+  const [attention, setAttention] = useState(true);
+  const [earned, setEarned] = useState(0);
+  const [paying, setPaying] = useState(false);
+  const baseline = useRef<number | null>(null);
+  const prev = useRef(0);
+  const video = useRef<HTMLVideoElement | null>(null);
+
+  // Drive attention: heartbeats gate the payout; runAd spawns the advertiser payer.
+  useEffect(() => {
+    const beat = setInterval(() => { if (attention) sendHeartbeat(ad.id, me.id); }, 1000);
+    const pump = setInterval(() => { if (attention) runAd(ad.id, me.id); }, 4000);
+    if (attention) { sendHeartbeat(ad.id, me.id); runAd(ad.id, me.id); }
+    return () => { clearInterval(beat); clearInterval(pump); };
+  }, [attention, ad.id, me.id]);
+
+  // Poll my on-chain earnings → delta since this ad opened.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const n = await fetchNet(me.id);
+        if (baseline.current == null) baseline.current = n.inUsd;
+        const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6);
+        setPaying(e > prev.current); prev.current = e; setEarned(e);
+      } catch { /* keep last */ }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [me.id]);
+
+  useEffect(() => { if (attention) video.current?.play().catch(() => {}); else video.current?.pause(); }, [attention]);
+
+  const price = Number(ad.pricePerSec);
+  const budget = Number(ad.maxBudget);
+  const spent = ad.spentUsd ?? 0;
+  const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+  const funded = ad.funded ?? budget - spent >= price;
+
+  return (
+    <div className="page">
+      <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back to ads</button><span className="muted">earning from an ad</span></div>
+      <div className="watch">
+        <div>
+          <div className="player ad">
+            {ad.hasVideo
+              ? <video ref={video} src={videoSrc(ad.id)} loop muted playsInline style={{ opacity: attention ? 1 : 0.4 }} />
+              : <span className="emoji" style={{ opacity: attention ? 1 : 0.4 }}>{ad.thumb ?? "📣"}</span>}
+            <span className="adtag">● AD</span>
+            {!attention && <div className="ov">🙈 looked away — you’re not earning</div>}
+            {!funded && <div className="ov">⛔ This ad is out of funding — it can’t pay right now.</div>}
+          </div>
+          <div className="w-title">{ad.title ?? ad.advertiser}</div>
+          <div className="w-chan">
+            <div className="a">{ad.thumb ?? "📣"}</div>
+            <div><b>{ad.advertiser}</b><div className="muted" style={{ fontSize: 12.5 }}>sponsored · pays you to watch · {ad.tags.map((t) => "#" + t).join(" ")}</div></div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h3><span className={"livedot in" + (paying ? " on" : "")} /> earning — paid by advertiser</h3>
+          <div className="bignum in">+ {usd(earned)}</div>
+          <div className="statline"><span className="k">rate</span><span>{usd(price)}/sec</span></div>
+          <div>
+            <div className="statline" style={{ marginBottom: 5 }}><span className="k">ad funding used</span><span>{usd(spent)} / {usd(budget)}</span></div>
+            <div className="bar"><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--out),#ff9356)" }} /></div>
+            <div className="statline" style={{ marginTop: 5 }}><span className="k">budget left</span><span style={{ color: funded ? "var(--in)" : "var(--out)" }}>{usd(Math.max(0, budget - spent))}</span></div>
+          </div>
+          <MoneyFlow dir="in" active={attention && paying} />
+          <div className="receipt" style={{ background: "#0f141f", borderColor: "#22304a" }}>💸 Money comes straight from <b>{ad.advertiser}</b>’s wallet — automatically, per second you watch.</div>
+          <div className="row">
+            <button className={attention ? "btn btn-ghost" : "btn"} style={{ flex: 1 }} onClick={() => setAttention((a) => !a)}>{attention ? "Look away 🙈" : "Look back 👀"}</button>
+            <button className="btn btn-ghost" onClick={onBack}>Stop</button>
+          </div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{!funded ? "⛔ unfunded — ask the advertiser to fund it" : attention ? (paying ? "👀 attention proven — being paid" : "👀 connecting advertiser payer…") : "🙈 paused — look back to keep earning"}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ───────────────────────── app ─────────────────────────
 function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
@@ -226,13 +310,12 @@ function App() {
   const [current, setCurrent] = useState<Clip | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
-  // ad
+  // ad (earn)
   const [adCampaign, setAdCampaign] = useState<string | null>(null);
-  const [attention, setAttention] = useState(true);
-  const [adPaying, setAdPaying] = useState(false);
-  const inPrev = useRef(0);
-  // studio
+  // studio (creator upload)
   const [title, setTitle] = useState(""); const [tags, setTags] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
+  // ad studio (advertiser upload)
+  const [adTitle, setAdTitle] = useState(""); const [adTags, setAdTags] = useState(""); const [adFile, setAdFile] = useState<File | null>(null); const [adBudget, setAdBudget] = useState("0.20"); const [publishingAd, setPublishingAd] = useState(false); const [fundingAd, setFundingAd] = useState<string | null>(null);
   const [admins, setAdmins] = useState<AdminUser[]>([]);
 
   useEffect(() => {
@@ -246,21 +329,26 @@ function App() {
   useEffect(() => {
     if (!me) return;
     setView(me.role === "advertiser" ? "campaigns" : me.role === "admin" ? "admin" : "home");
-    const tick = () => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); };
+    const tick = () => {
+      fetchNet(me.id).then(setNet).catch(() => {});
+      fetchBalance(me.id).then(setBalance).catch(() => {});
+      fetchCampaigns().then(setCampaigns).catch(() => {}); // live funding status
+    };
     tick(); const id = setInterval(tick, 3000); return () => clearInterval(id);
   }, [me]);
 
-  useEffect(() => {
-    if (!me || !adCampaign) return;
-    const beat = setInterval(() => { if (attention) sendHeartbeat(adCampaign, me.id); }, 1000);
-    const pump = setInterval(() => { if (attention) runAd(adCampaign, me.id); }, 4000);
-    if (attention) { sendHeartbeat(adCampaign, me.id); runAd(adCampaign, me.id); }
-    return () => { clearInterval(beat); clearInterval(pump); };
-  }, [adCampaign, attention, me]);
-  useEffect(() => { if (net) { setAdPaying(net.inUsd > inPrev.current); inPrev.current = net.inUsd; } }, [net]);
-
   function login(u: DemoUser) { localStorage.setItem("tempoflow-me", JSON.stringify(u)); setMe(u); setError(null); }
   function logout() { localStorage.removeItem("tempoflow-me"); setMe(null); setAdCampaign(null); setView("home"); }
+  async function submitAd() {
+    if (!me || !adTitle.trim()) return; setPublishingAd(true);
+    try { await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, Number(adBudget) || 0); setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setCampaigns(await fetchCampaigns()); }
+    catch (e: any) { setError(e?.message ?? String(e)); } setPublishingAd(false);
+  }
+  async function doFundAd(id: string) {
+    setFundingAd(id);
+    try { await fundCampaign(id, 0.2); setCampaigns(await fetchCampaigns()); if (me) setBalance(await fetchBalance(me.id)); }
+    catch (e: any) { setError(e?.message ?? String(e)); } setFundingAd(null);
+  }
   async function getFunds() { if (!me) return; setFunding(true); try { await fundUser(me.id); setBalance(await fetchBalance(me.id)); } catch (e: any) { setError(e?.message); } setFunding(false); }
   async function refreshAdmin() { try { setAdmins(await fetchAdminUsers()); } catch (e: any) { setError(e?.message); } }
   async function submitUpload() {
@@ -272,6 +360,8 @@ function App() {
   if (!me) return users.length ? <><Login users={users} onLogin={login} onError={setError} />{error && <div className="login"><div className="toast-err">{error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}</> : <div className="login"><div className="muted" style={{ padding: 40, textAlign: "center" }}>{error ?? "loading TempoFlow…"}</div></div>;
 
   const myClips = feed.filter((c) => c.ownerId === me.id);
+  const myAds = campaigns.filter((c) => c.ownerId === me.id);
+  const activeAd = adCampaign ? campaigns.find((c) => c.id === adCampaign) ?? null : null;
   const person = me.role === "viewer" || me.role === "creator";
   const nav: [string, string][] = [];
   if (person || me.role === "advertiser") nav.push(["home", "Home"]);
@@ -298,6 +388,8 @@ function App() {
 
       {view === "watch" && current
         ? <WatchView key={current.id} clip={current} me={me} onBack={() => go("home")} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
+        : view === "earn" && activeAd
+        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} onBack={() => setAdCampaign(null)} />
         : (
           <div className="page">
             {view === "home" && (<>
@@ -322,20 +414,29 @@ function App() {
             </>)}
 
             {view === "earn" && (<>
-              <div className="section-title">Earn — get paid for your attention</div>
-              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
+              <div className="section-title">Earn — watch ads, get paid for your attention</div>
+              <div className="muted" style={{ margin: "-8px 2px 14px", fontSize: 13 }}>Each ad pays you per second straight from the advertiser’s wallet. Ads with no funding can’t pay.</div>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))" }}>
                 {campaigns.map((c) => {
-                  const w = adCampaign === c.id;
+                  const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget);
+                  const funded = c.funded ?? budget - spent >= Number(c.pricePerSec);
+                  const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
                   return (
-                    <div key={c.id} className="adcard">
-                      <div className="role-chip">ad · money in</div>
-                      <div style={{ fontWeight: 700, fontSize: 16 }}>📣 {c.advertiser}</div>
-                      <div className="muted" style={{ fontSize: 13 }}>pays {usd(Number(c.pricePerSec))}/sec for proven attention</div>
-                      {w && <><div className="bignum in">+ {usd(net?.inUsd ?? 0)}</div><MoneyFlow dir="in" active={attention && adPaying} />
-                        <div className="muted" style={{ fontSize: 12.5 }}>{attention ? (adPaying ? "👀 attention proven — being paid" : "👀 connecting advertiser…") : "🙈 looked away — paused"}</div></>}
-                      <div className="row">
-                        {!w ? <button className="btn" style={{ flex: 1 }} onClick={() => { setAdCampaign(c.id); setAttention(true); }}>▶ Watch ad</button>
-                          : <><button className={attention ? "btn btn-ghost" : "btn"} style={{ flex: 1 }} onClick={() => setAttention((a) => !a)}>{attention ? "Look away 🙈" : "Look back 👀"}</button><button className="btn btn-ghost" onClick={() => setAdCampaign(null)}>Stop</button></>}
+                    <div key={c.id} className="vcard" onClick={() => funded && setAdCampaign(c.id)} style={{ cursor: funded ? "pointer" : "default" }}>
+                      <div className="vthumb ad">
+                        {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} preload="metadata" muted playsInline /> : <span className="emoji">{c.thumb ?? "📣"}</span>}
+                        <span className="adtag">● AD</span>
+                        <span className="badge in-badge">+{usd(Number(c.pricePerSec))}/s</span>
+                        {funded ? <div className="play">▶</div> : <div className="ov" style={{ fontSize: 13 }}>⛔ needs funding</div>}
+                      </div>
+                      <div className="vmeta">
+                        <div className="a">{c.thumb ?? "📣"}</div>
+                        <div style={{ flex: 1 }}>
+                          <div className="vtitle">{c.title ?? c.advertiser}</div>
+                          <div className="vchan">{c.advertiser} · sponsored</div>
+                          <div className="bar" style={{ marginTop: 7 }}><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--out),#ff9356)" }} /></div>
+                          <div className="vchan" style={{ marginTop: 4 }}>{funded ? <>funded · {usd(Math.max(0, budget - spent))} left</> : <span style={{ color: "var(--out)" }}>out of funding</span>}</div>
+                        </div>
                       </div>
                     </div>
                   );
@@ -344,13 +445,50 @@ function App() {
             </>)}
 
             {view === "campaigns" && (<>
-              <div className="section-title">Advertiser — campaigns</div>
-              <div className="login-card" style={{ marginTop: 0, marginBottom: 16 }}>
-                <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Your campaigns pay viewers per second of <b>proven attention</b>. When a viewer watches your ad, you pay them automatically.</div>
-                <button className="btn" onClick={async () => { try { await createCampaign(me.id, ["sponsored"]); setCampaigns(await fetchCampaigns()); } catch (e: any) { setError(e?.message); } }}>＋ New campaign</button>
+              <div className="section-title">Ad Studio</div>
+              <div className="login-card" style={{ marginTop: 0, marginBottom: 18 }}>
+                <h3 style={{ marginTop: 0 }}>Upload an ad</h3>
+                <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Your ad pays viewers per second of proven attention — <b>straight from your wallet, automatically</b>. Set a funded budget; when it runs out the ad stops paying.</div>
+                <div className="row" style={{ flexDirection: "column", gap: 9 }}>
+                  <input className="input" placeholder="Ad title" value={adTitle} onChange={(e) => setAdTitle(e.target.value)} />
+                  <input className="input" placeholder="tags (comma separated)" value={adTags} onChange={(e) => setAdTags(e.target.value)} />
+                  <input className="input" type="file" accept="video/*" onChange={(e) => setAdFile(e.target.files?.[0] ?? null)} />
+                  <div className="row">
+                    <input className="input" type="number" step="0.05" min="0" placeholder="budget $" value={adBudget} onChange={(e) => setAdBudget(e.target.value)} style={{ flex: 1 }} />
+                    <button className="btn" onClick={submitAd} disabled={!adTitle.trim() || publishingAd}>{publishingAd ? "publishing…" : "⬆ Publish ad"}</button>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12 }}>Budget is your committed spend cap — top up anytime. Need test funds in your wallet? Use 🚰 above.</div>
+                </div>
               </div>
-              {campaigns.filter((c) => c.ownerId === me.id).map((c) => <div key={c.id} className="urow" style={{ marginBottom: 8 }}><div><b>📣 {c.id}</b><div className="muted" style={{ fontSize: 12 }}>{usd(Number(c.pricePerSec))}/sec · budget ${c.maxBudget} · {c.tags.join(", ")}</div></div></div>)}
-              <div className="receipt" style={{ marginTop: 8 }}>spent this session: <b>{usd(net?.outUsd ?? 0)}</b></div>
+              <div className="section-title">Your ads ({myAds.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {myAds.map((c) => {
+                  const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget), left = Math.max(0, budget - spent);
+                  const funded = c.funded ?? left >= Number(c.pricePerSec);
+                  const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+                  return (
+                    <div key={c.id} className="adrow">
+                      <div className="adrow-thumb ad">
+                        {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "📣"}</span>}
+                        <span className="adtag">● AD</span>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700 }}>{c.title ?? c.id}</div>
+                        <div className="muted" style={{ fontSize: 12 }}>{usd(Number(c.pricePerSec))}/sec · {c.tags.join(", ") || "untargeted"}</div>
+                        <div className="bar" style={{ marginTop: 7 }}><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--out),#ff9356)" }} /></div>
+                        <div className="statline" style={{ marginTop: 5 }}><span className="k">funded budget</span><span>{usd(spent)} / {usd(budget)} · {usd(left)} left</span></div>
+                        <div className="statline"><span className="k">your wallet (pays the ad)</span><span>{c.advertiserBalance != null ? fmtBal(c.advertiserBalance) : "…"}</span></div>
+                      </div>
+                      <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                        <span className={"chip " + (funded ? "chip-ok" : "chip-bad")}>{funded ? "✓ funded" : "⛔ unfunded"}</span>
+                        <button className="btn btn-faucet btn-sm" onClick={() => doFundAd(c.id)} disabled={fundingAd === c.id}>{fundingAd === c.id ? "funding…" : "＋ Fund $0.20"}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!myAds.length && <div className="muted">No ads yet — upload one above.</div>}
+              </div>
+              <div className="receipt" style={{ marginTop: 12 }}>paid to viewers this session (from your wallet): <b>{usd(net?.outUsd ?? 0)}</b></div>
             </>)}
 
             {view === "admin" && (<>

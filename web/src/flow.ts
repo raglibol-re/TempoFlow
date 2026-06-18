@@ -57,6 +57,8 @@ export const fetchCampaigns = () => jget("/campaigns", "load campaigns").then((j
 export const fetchAdminUsers = () => jget("/admin/users", "load admin users").then((j) => (j.users ?? []) as AdminUser[]);
 export const fundUser = (userId: string) => jpost("/demo/fund", { userId }, "get test funds");
 export const createCampaign = (as: string, tags: string[]) => jpost("/campaigns", { as, tags }, "create campaign").then((j) => j.campaign as Campaign);
+/** Fund an ad: tops up the advertiser wallet (faucet) + raises the budget cap. */
+export const fundCampaign = (campaignId: string, amountUsd = 0.2) => jpost(`/campaigns/${campaignId}/fund`, { amountUsd }, "fund ad");
 export const resetNet = () => jpost("/reset", {}, "reset").catch(() => {});
 export const sendHeartbeat = (campaignId: string, viewer: string) => jpost("/heartbeat", { campaignId, viewer }, "heartbeat").catch(() => {});
 export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-ad", { campaignId, viewerId }, "start advertiser").catch(() => {});
@@ -109,14 +111,31 @@ export interface NetSnapshot {
 export const fetchNet = (as: string) => jget(`/net?as=${as}`, "load balance") as Promise<NetSnapshot>;
 export const fetchBalance = (as: string) => jget(`/balance?as=${as}`, "load wallet").then((j) => (j.balance ?? 0) as number);
 
-/** Log in with your own Tempo wallet (testnet private key → registered + usable). */
-export async function connectTempoAccount(privateKey: string, role: "viewer" | "creator" = "creator"): Promise<DemoUser> {
+/** Log in with your own Tempo wallet (testnet private key → registered + usable).
+ *  viewer/creator: the key stays in the browser. advertiser: the key is sent to
+ *  the server too, because the ad model auto-pays viewers FROM the advertiser
+ *  wallet (server-spawned payer). ⚠️ TESTNET ONLY. */
+export async function connectTempoAccount(privateKey: string, role: "viewer" | "creator" | "advertiser" = "creator"): Promise<DemoUser> {
   const key = (privateKey.trim().startsWith("0x") ? privateKey.trim() : "0x" + privateKey.trim()) as `0x${string}`;
   let address: `0x${string}`;
   try { address = privateKeyToAccount(key).address; } catch { throw new Error("invalid private key"); }
-  const reg = await jpost("/users", { address, role, name: "My Tempo Account", handle: `you-${address.slice(2, 6)}` }, "register account");
+  const body: any = { address, role, name: role === "advertiser" ? "My Ad Account" : "My Tempo Account", handle: `you-${address.slice(2, 6)}` };
+  if (role === "advertiser") body.key = key; // app pays from your wallet automatically
+  const reg = await jpost("/users", body, "register account");
   const u = reg.user;
-  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: "🪪", address, key };
+  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? (role === "advertiser" ? "📣" : "🪪"), address, key };
+}
+
+/** Advertiser uploads an ad (video + funded budget). */
+export async function uploadAd(as: string, title: string, tags: string[], file: File | null, budgetUsd: number): Promise<Campaign> {
+  const fd = new FormData();
+  fd.append("as", as); fd.append("title", title); fd.append("tags", tags.join(",")); fd.append("budget", String(budgetUsd));
+  if (file) fd.append("video", file);
+  try {
+    const r = await fetch(`${SERVER_URL}/campaigns`, { method: "POST", body: fd });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()).campaign as Campaign;
+  } catch (e: any) { throw new Error(`upload ad: ${e?.message ?? e}`); }
 }
 
 /** Upload a clip with a real video file (multipart). */

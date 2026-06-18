@@ -124,3 +124,18 @@ select.input { appearance: none; }
 .feed-events { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 5px; }
 .adcard { background: linear-gradient(160deg, #11231b, var(--surface)); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .urow { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+
+/* ---- Ads (red-framed = "this is an ad") ---- */
+.vthumb.ad { outline: 2.5px solid var(--out); outline-offset: -2.5px; box-shadow: 0 0 0 1px rgba(255,93,115,.3), 0 0 18px rgba(255,93,115,.22); }
+.vcard:hover .vthumb.ad { outline-color: #ff8094; }
+.player.ad { border: 3px solid var(--out); box-shadow: 0 0 26px rgba(255,93,115,.32); }
+.adtag { position: absolute; top: 8px; left: 8px; background: var(--out); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .5px; padding: 2px 8px; border-radius: 6px; box-shadow: 0 0 10px rgba(255,93,115,.6); z-index: 2; }
+.badge.in-badge { background: rgba(43,217,160,.92); color: #04190f; }
+.vthumb .ov { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 10px; background: rgba(0,0,0,.62); font-weight: 600; color: #fff; }
+.adrow { display: flex; align-items: center; gap: 14px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); border-left: 3px solid var(--out); }
+.adrow-thumb { position: relative; width: 132px; aspect-ratio: 16/9; border-radius: 8px; overflow: hidden; background: linear-gradient(135deg,#2a1418,#1a1117); display: grid; place-items: center; flex: none; }
+.adrow-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.adrow-thumb.ad { outline: 2px solid var(--out); outline-offset: -2px; }
+.chip { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.chip-ok { background: rgba(43,217,160,.15); color: var(--in); border: 1px solid rgba(43,217,160,.4); }
+.chip-bad { background: rgba(255,93,115,.13); color: var(--out); border: 1px solid rgba(255,93,115,.4); }
