@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+*.log
+.env
+.env.local
+server/flow.db
+server/flow.db-*
+server/uploads
+.wallets
+.vite
+web/dist
