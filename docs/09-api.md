@@ -32,7 +32,10 @@ Supabase. Roles: viewer/creator/advertiser/admin. The server settles every chann
 **operator**, so it pays out to any creator/viewer wallet. `/watch/:id?as=<viewerId>` pays the
 clip's creator; `/attention/:campaignId/:viewerId` pays that viewer (company = payer). Uploaded
 videos are stored on disk (`server/uploads/`) + path in SQLite, served at `/video/:clipId`.
-The web `<video>` is **payment-gated**: it pauses if the per-second payment stops.
+The web `<video>` is **payment-gated**: it pauses if the per-second payment stops. The
+Home tab has a **"Low-funds demo"** toggle that caps the channel (`maxDeposit≈0.012`) so
+payment runs out after ~6s — the video then stops with an "out of funds" overlay, making
+the funding↔playback link one-click visible.
 
 ## Heartbeat payload
 ```jsonc

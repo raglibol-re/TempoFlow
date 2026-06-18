@@ -70,17 +70,21 @@ export interface Tick { second: number; spentUsd: number; creator: string; clipI
 export interface CloseSummary { spentUsd?: number; refundUsd?: number; txHash?: string }
 export interface WatchHandle { stop: () => Promise<CloseSummary | undefined> }
 
-function manager(user: DemoUser) {
+function manager(user: DemoUser, maxDeposit = "0.5") {
   const account = privateKeyToAccount(user.key);
   const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
-  return sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit: "0.5", escrow: ESCROW_CONTRACT });
+  return sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit, escrow: ESCROW_CONTRACT });
 }
 const rawToUsd = (raw?: string) => (raw == null ? undefined : Number(raw) / 10 ** TOKEN_DECIMALS);
 
 /** Watch a clip as `me`, paying its creator per second. onTick each paid second;
- *  onEnd when the stream ends (funding stopped / closed). */
-export async function watchClip(clip: Clip, me: DemoUser, onTick: (t: Tick) => void, onEnd: () => void): Promise<WatchHandle> {
-  const mgr = manager(me);
+ *  onEnd when the stream ends (funding stopped / closed). `maxDeposit` caps how
+ *  much the channel can fund — a small value makes payment stop early (demo). */
+export async function watchClip(
+  clip: Clip, me: DemoUser, onTick: (t: Tick) => void,
+  onEnd: (reason: "ended" | "out-of-funds") => void, maxDeposit = "0.5",
+): Promise<WatchHandle> {
+  const mgr = manager(me, maxDeposit);
   let stream: AsyncIterable<string>;
   try {
     stream = await mgr.sse(`${SERVER_URL}/watch/${clip.id}?as=${me.id}`);
@@ -88,10 +92,15 @@ export async function watchClip(clip: Clip, me: DemoUser, onTick: (t: Tick) => v
     throw new Error(`open payment channel for "${clip.title}" failed: ${e?.message ?? e}`);
   }
   const drained = (async () => {
-    for await (const data of stream) {
-      try { const t = JSON.parse(data) as Tick; if (t?.second) onTick(t); } catch { /* keep-alive */ }
+    try {
+      for await (const data of stream) {
+        try { const t = JSON.parse(data) as Tick; if (t?.second) onTick(t); } catch { /* keep-alive */ }
+      }
+      onEnd("ended");
+    } catch {
+      // mid-stream failure (e.g. funds/voucher cap reached) → funding stopped
+      onEnd("out-of-funds");
     }
-    onEnd();
   })();
   return {
     async stop() {

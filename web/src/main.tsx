@@ -102,14 +102,17 @@ function Login({ users, onPick }: { users: DemoUser[]; onPick: (u: DemoUser) => 
 }
 
 // ─────────────────────────── Clip player (gated) ───────────────────────────
-function ClipCard({ clip, me, onError }: { clip: Clip; me: DemoUser; onError: (e: string) => void }) {
+function ClipCard({ clip, me, lowFunds, onError }: { clip: Clip; me: DemoUser; lowFunds: boolean; onError: (e: string) => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing" | "done">("idle");
   const [spent, setSpent] = useState(0);
+  const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
   const [summary, setSummary] = useState<CloseSummary | null>(null);
   const handle = useRef<WatchHandle | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const lastTick = useRef(0);
+  const capping = useRef(false);
   const collab = clip.recipients.length > 1;
+  const LOW_FUNDS_CAP = 0.012; // ~6 seconds of watchtime
 
   // Stall detector: pause video if payments stop flowing.
   useEffect(() => {
@@ -121,18 +124,22 @@ function ClipCard({ clip, me, onError }: { clip: Clip; me: DemoUser; onError: (e
   }, [phase]);
 
   async function start() {
-    setSummary(null); setSpent(0); setPhase("opening");
+    setSummary(null); setSpent(0); setReason(null); capping.current = false; setPhase("opening");
     try {
       handle.current = await watchClip(clip, me,
-        (t: Tick) => { lastTick.current = Date.now(); setSpent(t.spentUsd); setPhase("watching"); video.current?.play().catch(() => {}); },
-        () => { setPhase("paused"); video.current?.pause(); });
+        (t: Tick) => {
+          lastTick.current = Date.now(); setSpent(t.spentUsd); setPhase("watching"); video.current?.play().catch(() => {});
+          // Low-funds demo: the viewer's session budget runs out → stop paying → stop video.
+          if (lowFunds && t.spentUsd >= LOW_FUNDS_CAP && !capping.current) { capping.current = true; closeOut("out-of-funds"); }
+        },
+        (r) => { if (!capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
     } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); }
   }
-  async function stop() {
+  async function closeOut(why: "ended" | "out-of-funds") {
     if (!handle.current) return;
-    setPhase("closing"); video.current?.pause();
+    setReason(why); video.current?.pause(); setPhase("closing");
     try { setSummary((await handle.current.stop()) ?? null); } catch (e: any) { onError(e?.message ?? String(e)); }
-    handle.current = null; setPhase("done");
+    handle.current = null; setPhase(why === "out-of-funds" ? "paused" : "done");
   }
   const watching = phase === "watching" || phase === "paused" || phase === "opening";
 
@@ -145,7 +152,7 @@ function ClipCard({ clip, me, onError }: { clip: Clip; me: DemoUser; onError: (e
         ) : (
           <div style={{ fontSize: 54, opacity: phase === "watching" ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</div>
         )}
-        {phase === "paused" && <div style={s.overlay}>⏸ funding stopped — Get test funds to continue</div>}
+        {phase === "paused" && <div style={s.overlay}>{reason === "out-of-funds" ? "⛔ out of funds — payment stopped, so the video stopped. Press ▶ Watch to continue." : "⏸ payment paused — press ▶ Watch to resume"}</div>}
         {phase === "opening" && <div style={s.overlay}>opening payment channel…</div>}
       </div>
       <div style={{ fontWeight: 600 }}>{clip.title}</div>
@@ -153,10 +160,10 @@ function ClipCard({ clip, me, onError }: { clip: Clip; me: DemoUser; onError: (e
       {collab && <div style={s.split}>split: {clip.recipients.map((r, i) => <span key={i}>{i ? " · " : ""}{r.label} {r.percentage}%</span>)}</div>}
       {watching && <><div style={s.out}>− ${spent.toFixed(3)}</div><MoneyFlow dir="out" active={phase === "watching"} label="→ creator" /></>}
       <div style={{ display: "flex", gap: 8 }}>
-        <button style={s.btn} onClick={start} disabled={phase === "opening" || phase === "watching" || phase === "paused"}>
-          {phase === "opening" ? "opening…" : phase === "watching" ? "watching…" : phase === "paused" ? "paused" : "▶ Watch"}
+        <button style={s.btn} onClick={start} disabled={phase === "opening" || phase === "watching" || phase === "closing"}>
+          {phase === "opening" ? "opening…" : phase === "watching" ? "watching…" : phase === "paused" ? "▶ Resume" : "▶ Watch"}
         </button>
-        <button style={s.ghost} onClick={stop} disabled={phase !== "watching" && phase !== "paused"}>Skip ⏭</button>
+        <button style={s.ghost} onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Skip ⏭</button>
       </div>
       {summary && <div style={s.receipt}>✓ paid ${summary.spentUsd?.toFixed(3)} · refunded ${summary.refundUsd?.toFixed(3)}{collab && summary.spentUsd != null && clip.recipients.map((r, i) => <div key={i} style={{ opacity: 0.85 }}>→ {r.label}: ${((summary.spentUsd! * r.percentage) / 100).toFixed(4)}</div>)}</div>}
     </div>
@@ -173,6 +180,7 @@ function App() {
   const [tab, setTab] = useState("home");
   const [error, setError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
+  const [lowFunds, setLowFunds] = useState(false);
   const [myBalance, setMyBalance] = useState<number | null>(null);
 
   // ad
@@ -276,7 +284,13 @@ function App() {
 
       <div style={s.body}>
         {/* Home — feed */}
-        {tab === "home" && feed.map((clip) => <ClipCard key={clip.id} clip={clip} me={me} onError={setError} />)}
+        {tab === "home" && (
+          <label style={{ ...s.card, flexDirection: "row", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <input type="checkbox" checked={lowFunds} onChange={(e) => setLowFunds(e.target.checked)} />
+            <span style={{ fontSize: 13 }}>⚡ <b>Low-funds demo</b> — cap the channel so payment runs out after ~6s and the video stops</span>
+          </label>
+        )}
+        {tab === "home" && feed.map((clip) => <ClipCard key={clip.id} clip={clip} me={me} lowFunds={lowFunds} onError={setError} />)}
 
         {/* Studio — upload */}
         {tab === "studio" && (
