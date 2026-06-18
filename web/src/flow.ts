@@ -12,8 +12,23 @@ import {
   type Clip, type Campaign, type Role,
 } from "@flow/shared";
 
-export const SERVER_URL =
-  (import.meta as any).env?.VITE_SERVER_URL ?? "http://localhost:3000";
+/**
+ * Resolve the backend URL at RUNTIME so a single Vercel build can target any
+ * backend (e.g. a local machine exposed via an ngrok/cloudflared tunnel) without
+ * rebuilding. Precedence: `?server=<url>` query param (remembered in
+ * localStorage) → previously saved value → build-time VITE_SERVER_URL → localhost.
+ */
+function resolveServerUrl(): string {
+  try {
+    const qp = new URLSearchParams(window.location.search).get("server");
+    if (qp) { localStorage.setItem("flow.serverUrl", qp); return qp.replace(/\/+$/, ""); }
+    const saved = localStorage.getItem("flow.serverUrl");
+    if (saved) return saved.replace(/\/+$/, "");
+  } catch { /* non-browser context — fall through */ }
+  return ((import.meta as any).env?.VITE_SERVER_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+}
+
+export const SERVER_URL = resolveServerUrl();
 
 export interface DemoUser {
   id: string; name: string; role: Role; handle: string; avatar: string;
