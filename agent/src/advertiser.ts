@@ -36,9 +36,9 @@ const log = makeLogger("advertiser");
 async function main() {
   // Act as a company; pay a specific viewer for attention.
   const all = await fetchDemoUsers();
-  const company = all.find((u) => u.kind === "company" && (!f.as || u.id === f.as)) ?? all.find((u) => u.kind === "company");
-  const target = all.find((u) => u.kind === "person" && (!f.to || u.id === f.to)) ?? all.find((u) => u.kind === "person");
-  if (!company || !target) throw new Error("need a company + a person user on the server");
+  const company = all.find((u) => u.role === "advertiser" && (!f.as || u.id === f.as)) ?? all.find((u) => u.role === "advertiser");
+  const target = all.find((u) => u.role === "viewer" && (!f.to || u.id === f.to)) ?? all.find((u) => u.role === "viewer");
+  if (!company || !target) throw new Error("need an advertiser + a viewer user on the server");
   const { manager } = makeManager(company.key);
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
   log.info(`advertiser acting as ${company.name} → paying viewer ${target.name}`, { budget: BUDGET, targetTags: TARGET_TAGS });
