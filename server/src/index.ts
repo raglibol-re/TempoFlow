@@ -28,6 +28,7 @@ import {
   addCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
+import { runAd, isAdRunning } from "./adrunner.js";
 
 const app = new Hono();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -124,10 +125,23 @@ app.post("/heartbeat", async (c) => {
   return c.json({ ok: true });
 });
 
+/** Demo convenience: have the campaign's company pay this viewer in-browser
+ *  (server acts as the advertiser). Gated by the viewer's heartbeats. */
+app.post("/demo/run-ad", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const campaignId = String(b?.campaignId ?? "");
+  const viewerId = String(b?.viewerId ?? "");
+  if (!getCampaign(campaignId) || !getUser(viewerId)) return c.json({ error: "bad campaignId/viewerId" }, 400);
+  if (!isAdRunning(campaignId, viewerId)) void runAd(campaignId, viewerId); // background
+  return c.json({ ok: true, running: true });
+});
+
 // graceful-stop flags (shared by /watch and /attention)
 const stopRequested = new Set<string>();
 app.post("/watch/:id/stop", (c) => (stopRequested.add(c.req.param("id")), c.json({ ok: true })));
-app.post("/attention/:campaignId/stop", (c) => (stopRequested.add(c.req.param("campaignId")), c.json({ ok: true })));
+app.post("/attention/:campaignId/:viewerId/stop", (c) =>
+  (stopRequested.add(`${c.req.param("campaignId")}:${c.req.param("viewerId")}`), c.json({ ok: true })),
+);
 
 // ── Direction A: watch a creator clip (Viewer → Creator) ────────────────────
 app.on(["GET", "POST"], "/watch/:id", async (c) => {
@@ -173,13 +187,15 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
 });
 
 // ── Direction B: advertiser pays a viewer for proven attention ──────────────
-app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
+app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
   const campaign = getCampaign(c.req.param("campaignId"));
-  if (!campaign) return c.json({ error: "not found" }, 404);
+  if (!campaign) return c.json({ error: "campaign not found" }, 404);
+  // Viewer is in the PATH (not query) so it survives mppx's voucher-POST URL
+  // (managementInput strips the query string). recipient must stay consistent.
+  const viewer = getUser(c.req.param("viewerId"));
+  if (!viewer) return c.json({ error: "viewer not found" }, 404);
   const origin = c.req.header("origin");
-  const toId = c.req.query("to"); // viewer being advertised to
-  const viewer = getUser(toId ?? "");
-  if (!viewer) return c.json({ error: "missing ?to=<viewerId>" }, 400);
+  const stopKey = `${campaign.id}:${viewer.id}`;
 
   const result = await mppx.session({
     amount: campaign.pricePerSec,
@@ -197,7 +213,7 @@ app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
 
   const company = getUser(campaign.ownerId);
   const fromAddr = company?.address ?? "0xadvertiser";
-  stopRequested.delete(campaign.id);
+  stopRequested.delete(stopKey);
   const pricePerSec = Number(campaign.pricePerSec);
   const maxBudget = Number(campaign.maxBudget);
   return corsify(
@@ -205,8 +221,8 @@ app.on(["GET", "POST"], "/attention/:campaignId", async (c) => {
     result.withReceipt(async function* (stream) {
       let paid = 0;
       for (;;) {
-        if (stopRequested.has(campaign.id) || paid >= maxBudget) {
-          stopRequested.delete(campaign.id);
+        if (stopRequested.has(stopKey) || paid >= maxBudget) {
+          stopRequested.delete(stopKey);
           return;
         }
         if (attentionFresh(campaign.id, viewer.id)) {

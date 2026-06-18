@@ -193,3 +193,33 @@ manager/channel per clip**. (2) advertiser would hang when attention stopped →
 
 **Phases 1–5 complete.** Remaining: Phase 6 demo hardening (seed/demo mode, reset button,
 network fallbacks, dress rehearsal) + capture the README GIF.
+
+## 2026-06-18 — Multi-user redesign (YouTube/Twitch-style)
+
+**Failed-fetch (precise):** ruled out backend — server `/health` 200, `/watch` 402 with CORS,
+browser `/net`+`/heartbeat` polls returning 200 in the log, RPC CORS `*` for all methods,
+viewer funded (1,000,016 pathUSD). Conclusion: stale browser tab after many dev restarts →
+hard-refresh. Hardened anyway: the web now wraps every request with a **labeled error**
+(which URL/step failed) so it never just says "failed to fetch".
+
+**Operator settlement (key change):** the server now settles every channel as the **operator**,
+so it can pay out to ANY recipient wallet without holding their key. Verified on testnet:
+watched Alice's clip → settled `spent 8000` to Alice's distinct wallet. This unlocks multi-user.
+
+**Multi-user model:**
+- `users.ts`: 6 demo users (4 persons, 2 companies), each a funded Tempo wallet, persisted to
+  `.users.json` (funded once). Exposed via `/demo/users` (testnet keys) for the web switcher.
+- `content.ts`: clips owned by creators (distinct wallets) + campaigns owned by companies;
+  `POST /clips` (creator posts) + `POST /campaigns` (company creates).
+- `ledger.ts`: per-address net (`/net?as=<userId>`) — each user sees their own in/out/net.
+- `/watch/:id?as=<viewer>` pays the clip's creator; `/attention/:id?to=<viewer>` pays that viewer.
+
+**Web — full multi-user dashboard:** account switcher (avatars), per-user net; **persons** get
+Home (multi-channel feed, watch=pay creator), Studio (post a clip), Earn (watch ads → get paid,
+attention-gated); **companies** get a campaigns view. Money-flow animation + live receipts kept.
+
+**In-browser ads:** an in-process server-side advertiser hit mppx's "object is not extensible"
+(can't import mppx/client into the mppx/server process). Fixed by `/demo/run-ad` **spawning the
+advertiser agent** as a child process targeting the watching viewer (idle-stops when they leave).
+
+All 4 workspaces typecheck. Operator settlement verified on-chain; multi-creator feed + posting live.

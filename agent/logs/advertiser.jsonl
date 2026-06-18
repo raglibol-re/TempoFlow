@@ -71,3 +71,79 @@
 {"t":"2026-06-18T02:39:18.372Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
 {"t":"2026-06-18T02:39:18.376Z","agent":"advertiser","kind":"info","msg":"budget reached ($0.0600/0.06) — stopping"}
 {"t":"2026-06-18T02:39:23.649Z","agent":"advertiser","kind":"summary","paidToViewers":0.06,"txHash":"0x5bdfc5968a73b7348872dd523f21966b85a0d566eb851c0139691eb03483ff41"}
+{"t":"2026-06-18T03:14:26.262Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":0.04,"targetTags":[]}
+{"t":"2026-06-18T03:14:26.277Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T03:14:26.283Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T03:14:31.877Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:14:32.911Z","agent":"advertiser","kind":"info","msg":"error: Voucher POST failed with status 400"}
+{"t":"2026-06-18T03:17:35.618Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":0.04,"targetTags":[]}
+{"t":"2026-06-18T03:17:35.641Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T03:17:35.647Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T03:17:41.388Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:42.490Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:43.615Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:44.741Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:45.850Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:47.083Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:48.207Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:49.333Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:50.460Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:51.581Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:17:51.583Z","agent":"advertiser","kind":"info","msg":"budget reached ($0.0400/0.04) — stopping"}
+{"t":"2026-06-18T03:17:57.887Z","agent":"advertiser","kind":"summary","paidToViewers":0.04,"txHash":"0xf6575be8c288cc10839ca8637ea423a353cdf7a9f0757fbd972cbb18b84e194b"}
+{"t":"2026-06-18T03:20:59.261Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Carol Nguyen","budget":1,"targetTags":[]}
+{"t":"2026-06-18T03:20:59.276Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T03:20:59.281Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Carol Nguyen $0.004/sec for proven attention"}
+{"t":"2026-06-18T03:21:05.079Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:06.193Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:07.314Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:08.436Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:09.558Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:10.792Z","agent":"advertiser","kind":"payment","direction":"out","amount":0.004,"counterparty":"viewer","contentId":"camp-tempo"}
+{"t":"2026-06-18T03:21:11.800Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:12.801Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:13.802Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:14.818Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:15.820Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:16.822Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:17.838Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:18.854Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:19.867Z","agent":"advertiser","kind":"info","msg":"attention lost — not paying (gate active)"}
+{"t":"2026-06-18T03:21:19.868Z","agent":"advertiser","kind":"info","msg":"no attention for 9s — ending campaign"}
+{"t":"2026-06-18T03:21:22.381Z","agent":"advertiser","kind":"summary","paidToViewers":0.024,"txHash":"0x5d40a8799dae43e5f953d8815b01b61d069b2a5982cb7f4738f2a35ddf847474"}
+{"t":"2026-06-18T16:38:17.535Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:38:17.562Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:38:17.568Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:38:19.894Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:38:35.163Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:38:35.187Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:38:35.194Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:38:37.530Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:38:49.225Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:38:49.242Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:38:49.248Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:38:51.589Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:39:01.075Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:39:01.092Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:39:01.099Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:39:03.416Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:39:13.141Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:39:13.159Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:39:13.165Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:39:15.502Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:39:26.380Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:39:26.407Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:39:26.414Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:39:28.731Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:39:41.359Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:39:41.378Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:39:41.385Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:39:43.700Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:39:56.937Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:39:56.961Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:39:56.966Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:39:59.328Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}
+{"t":"2026-06-18T16:40:15.390Z","agent":"advertiser","kind":"info","msg":"advertiser acting as Tempo Pay → paying viewer Alice Rivera","budget":1,"targetTags":[]}
+{"t":"2026-06-18T16:40:15.407Z","agent":"advertiser","kind":"info","msg":"discovered 1 attention endpoint(s)","paths":["/attention/{campaignId}"]}
+{"t":"2026-06-18T16:40:15.413Z","agent":"advertiser","kind":"info","msg":"running campaign \"camp-tempo\" — paying Alice Rivera $0.004/sec for proven attention"}
+{"t":"2026-06-18T16:40:17.739Z","agent":"advertiser","kind":"info","msg":"error: HTTP request failed.\n\nURL: https://rpc.moderato.tempo.xyz/\nRequest body: {\"method\":\"eth_getTransactionCount\",\"params\":[\"0xf716EEF34889E8C08b93b7eE54524a6c16970676\",\"pending\"]}\n\nDetails: fetch failed\nVersion: viem@2.52.2"}

@@ -26,5 +26,17 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | P5.1 | Money-flow animation + net-balance meter + receipts view | done | directional flow lanes (out red / in green), net meter, live receipts feed |
 | P5.2 | Mobile layout, empty/error states, reconnects | done | phone-width layout, loading/error states, net poll auto-retries |
 | P5.3 | Docs 07/08 + README | done | demo script + pitch finalized w/ real numbers; README refreshed (GIF still TODO) |
-| P6.1 | Seed data, demo mode, fallbacks, reset | todo | — |
+| P6.1 | Seed data, demo mode, fallbacks, reset | partial | reset button; seeded users/clips/campaigns; demo keys persisted |
 | P6.2 | Dress rehearsal vs 07-demo-script.md | todo | — |
+
+## Multi-user redesign (YouTube/Twitch-style)
+
+| # | Milestone | Status | Evidence |
+|---|---|---|---|
+| MU.1 | Operator settlement → pay any creator/viewer wallet | done | watched Alice's clip, settled to her distinct wallet on-chain |
+| MU.2 | Multi-user registry (persons + companies), funded, persisted | done | 6 users in `.users.json`, `/users` + `/demo/users` |
+| MU.3 | Multi-channel feed + post clips (`POST /clips`) | done | 4 clips across owners; Studio posts new clips |
+| MU.4 | Per-user net balance (`/net?as=`) | done | each user sees own in/out/net |
+| MU.5 | Advertiser pays a chosen viewer (path-based, voucher-POST safe) | done | agent paid Alice $0.04 continuously (fixed query-strip bug) |
+| MU.6 | Web account switcher + role dashboards + flow animation | done | Home/Studio/Earn (person), Campaigns (company) |
+| MU.7 | In-browser ads (server spawns advertiser agent) | done | watcher earned $0.02 in-browser via spawned advertiser (stdio piped) |

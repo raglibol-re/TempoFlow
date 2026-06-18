@@ -17,6 +17,7 @@ import { TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, tempoTestnet } from "@f
 
 const SERVER = process.env.SERVER_URL ?? "http://localhost:3000";
 const CAMPAIGN = "camp-tempo";
+const TO = "alice"; // viewer being paid (a person user); heartbeats simulated below
 
 function requireKey(name: string): `0x${string}` {
   const v = process.env[name];
@@ -46,7 +47,7 @@ async function main() {
       fetch(`${SERVER}/heartbeat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ campaignId: CAMPAIGN }),
+        body: JSON.stringify({ campaignId: CAMPAIGN, viewer: TO }),
       }).catch(() => {});
   }, 1000);
   // prime one heartbeat before opening
@@ -57,7 +58,7 @@ async function main() {
   });
 
   console.log(`[adv] advertiser ${account.address} → paying viewer for attention`);
-  const stream = await manager.sse(`${SERVER}/attention/${CAMPAIGN}`, {
+  const stream = await manager.sse(`${SERVER}/attention/${CAMPAIGN}/${TO}`, {
     onReceipt: (r: any) => console.log("[adv] receipt spent:", r?.spent),
   });
 
@@ -76,7 +77,7 @@ async function main() {
     }
     if (ticks >= 13) {
       console.log("[adv] >>> campaign done → graceful stop");
-      await fetch(`${SERVER}/attention/${CAMPAIGN}/stop`, { method: "POST" });
+      await fetch(`${SERVER}/attention/${CAMPAIGN}/${TO}/stop`, { method: "POST" });
     }
   }
   clearInterval(hb);

@@ -40,11 +40,19 @@ pnpm wallets:setup          # generate + fund testnet wallets, writes .env (TEST
 pnpm dev                    # ONE COMMAND → server :3000 + web :5173
 ```
 
-Open **http://localhost:5173**:
-- **Watch** a clip → money streams **out** to the creator per second; **Skip** → settle
-  on-chain + refund. The collab clip shows a 70/20/10 split.
-- Run the advertiser (`pnpm --filter @flow/server spike:attention`), then toggle
-  **Look away / Look back** on the ad card → money streams **in** only while you're watching.
+Open **http://localhost:5173** (a multi-user, YouTube/Twitch-style dashboard):
+- **Account switcher** (top-right avatars): be any of the demo users — people (watch + post)
+  or companies (run ads). Each has its own funded Tempo wallet; you pay/earn as them.
+- **Home**: a multi-channel feed — **Watch** any clip → money streams **out** to *that*
+  creator per second; **Skip** → settle on-chain + refund. Collab clips show a 70/20/10 split.
+- **Studio**: post your own clip → it joins the feed and earns to your wallet.
+- **Earn**: watch an ad → an advertiser pays **you** per second of attention; **Look away**
+  and the payment pauses (heartbeat-gated).
+- **Company** accounts: a campaigns view; viewers who watch your ad get paid by you.
+
+> If the page ever shows a stale error after a code change, hard-refresh (Ctrl+Shift+R) —
+> the dev server hot-reloads and old tabs can hold a dead connection. The app now reports
+> the exact failing step rather than a generic "failed to fetch".
 
 **Autonomous agents** (the leave-it-running wow):
 ```bash

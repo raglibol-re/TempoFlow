@@ -82,6 +82,23 @@ makes "ads pay you" real instead of farmable.
 - `GET /openapi.json` (discovery) advertises creator streams and ad campaigns with
   `x-payment-info`, so the **agents** can find content and campaigns automatically.
 
+## Multi-user model (YouTube/Twitch-style)
+
+- **Users** (`server/src/users.ts`): demo people (watch + post) and companies (run ads),
+  each a funded Tempo wallet, persisted to `.users.json`. Exposed via `/demo/users` (testnet
+  keys) for the web **account switcher**; you pay/earn as the selected user.
+- **Operator settlement (key enabler):** the server settles every channel as the channel
+  **operator**, so it pays out to ANY creator/viewer wallet without holding their key. So
+  `/watch/:id?as=<viewer>` pays the clip's creator wallet; `/attention/:campaignId/:viewerId`
+  pays that viewer (the campaign's company is the payer). Verified on-chain.
+- **Voucher-POST routing gotcha:** mppx's mid-stream voucher POST strips the URL query
+  (`managementInput`), so the viewer is carried in the **path** (`/attention/:c/:viewerId`),
+  not the query, to keep the recipient consistent across top-ups (06 DEV-K).
+- **Content** (`content.ts`): clips owned by creators, campaigns by companies; `POST /clips`
+  and `POST /campaigns` let users create. **Ledger** (`ledger.ts`) is per-address.
+- **In-browser ads:** `POST /demo/run-ad` spawns the advertiser agent (separate process)
+  targeting the watching viewer, gated by heartbeats — so ads pay in one browser tab.
+
 ## Persistence
 
-In-memory state + optional SQLite for receipts/flow events. No heavy DB (hackathon scope).
+In-memory state (+ `.users.json` for stable demo wallets). No heavy DB (hackathon scope).

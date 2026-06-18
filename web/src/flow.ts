@@ -1,9 +1,9 @@
 /**
- * Browser-side FLOW client (Direction A — Viewer → Creator).
+ * Browser-side FLOW client (multi-user). Acts as a selected user (person or
+ * company), paying from that user's wallet. ⚠️ TESTNET ONLY — demo keys come
+ * from the server's /demo/users for the account switcher.
  *
- * ⚠️ TESTNET ONLY. The viewer key is bundled client-side for the demo.
- * Opens an mppx payment channel, streams a clip while paying per second,
- * and closes (settle + refund) on skip.
+ * Every network step is labeled so failures say WHAT failed, not just "Failed to fetch".
  */
 
 import { sessionManager } from "mppx/client";
@@ -21,114 +21,88 @@ import {
 export const SERVER_URL =
   (import.meta as any).env?.VITE_SERVER_URL ?? "http://localhost:3000";
 
-const VIEWER_KEY = (import.meta as any).env?.VITE_VIEWER_PRIVATE_KEY as
-  | `0x${string}`
-  | undefined;
-
-export const viewerAddress = VIEWER_KEY
-  ? privateKeyToAccount(VIEWER_KEY).address
-  : undefined;
-
-export async function fetchFeed(): Promise<Clip[]> {
-  const res = await fetch(`${SERVER_URL}/feed`);
-  const json = await res.json();
-  return json.clips ?? [];
+export interface DemoUser {
+  id: string;
+  name: string;
+  kind: "person" | "company";
+  handle: string;
+  avatar: string;
+  address: `0x${string}`;
+  key: `0x${string}`;
 }
 
-export async function fetchCampaigns(): Promise<Campaign[]> {
-  const res = await fetch(`${SERVER_URL}/campaigns`);
-  const json = await res.json();
-  return json.campaigns ?? [];
+async function getJson(path: string, label: string): Promise<any> {
+  try {
+    const r = await fetch(`${SERVER_URL}${path}`);
+    if (!r.ok) throw new Error(`${label}: server returned ${r.status}`);
+    return await r.json();
+  } catch (e: any) {
+    throw new Error(`${label} (${SERVER_URL}${path}): ${e?.message ?? e}`);
+  }
 }
+async function postJson(path: string, body: any, label: string): Promise<any> {
+  try {
+    const r = await fetch(`${SERVER_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`${label}: server returned ${r.status}`);
+    return await r.json();
+  } catch (e: any) {
+    throw new Error(`${label} (${SERVER_URL}${path}): ${e?.message ?? e}`);
+  }
+}
+
+export const fetchUsers = () => getJson("/demo/users", "load users").then((j) => j.users as DemoUser[]);
+export const fetchFeed = () => getJson("/feed", "load feed").then((j) => (j.clips ?? []) as Clip[]);
+export const fetchCampaigns = () => getJson("/campaigns", "load campaigns").then((j) => (j.campaigns ?? []) as Campaign[]);
 
 export interface NetSnapshot {
   inUsd: number;
   outUsd: number;
   netUsd: number;
-  events: {
-    id: string;
-    direction: "in" | "out";
-    amount: string;
-    counterparty: string;
-    contentId: string;
-  }[];
+  events: { id: string; direction: "in" | "out"; amount: string; counterparty: string; contentId: string }[];
+}
+export const fetchNet = (as: string) => getJson(`/net?as=${as}`, "load balance") as Promise<NetSnapshot>;
+export const resetNet = () => postJson("/reset", {}, "reset").catch(() => {});
+export const sendHeartbeat = (campaignId: string, viewer: string) =>
+  postJson("/heartbeat", { campaignId, viewer }, "heartbeat").catch(() => {});
+export const postClip = (as: string, title: string, tags: string[], durationSec: number) =>
+  postJson("/clips", { as, title, tags, durationSec }, "post clip").then((j) => j.clip as Clip);
+export const createCampaign = (as: string, tags: string[]) =>
+  postJson("/campaigns", { as, tags }, "create campaign").then((j) => j.campaign as Campaign);
+export const runAd = (campaignId: string, viewerId: string) =>
+  postJson("/demo/run-ad", { campaignId, viewerId }, "start advertiser").catch(() => {});
+
+export interface Tick { second: number; spentUsd: number; creator: string; clipId: string }
+export interface CloseSummary { channelId?: string; spentUsd?: number; refundUsd?: number; txHash?: string }
+export interface WatchHandle { stop: () => Promise<CloseSummary | undefined> }
+
+function manager(user: DemoUser) {
+  const account = privateKeyToAccount(user.key);
+  const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+  return sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit: "0.5", escrow: ESCROW_CONTRACT });
 }
 
-export async function fetchNet(): Promise<NetSnapshot> {
-  return fetch(`${SERVER_URL}/net`).then((r) => r.json());
-}
+const rawToUsd = (raw?: string) => (raw == null ? undefined : Number(raw) / 10 ** TOKEN_DECIMALS);
 
-export async function resetNet(): Promise<void> {
-  await fetch(`${SERVER_URL}/reset`, { method: "POST" });
-}
-
-/** Send one attention heartbeat for a campaign (tab visible + ad in viewport). */
-export async function sendHeartbeat(campaignId: string): Promise<void> {
-  await fetch(`${SERVER_URL}/heartbeat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ campaignId }),
-  }).catch(() => {});
-}
-
-export interface WatchHandle {
-  stop: () => Promise<CloseSummary | undefined>;
-}
-
-export interface Tick {
-  second: number;
-  spentUsd: number;
-  creator: string;
-  clipId: string;
-}
-
-export interface CloseSummary {
-  channelId?: string;
-  spentRaw?: string;
-  txHash?: string;
-  refundUsd?: number;
-  spentUsd?: number;
-}
-
-function rawToUsd(raw?: string): number | undefined {
-  if (raw == null) return undefined;
-  return Number(raw) / 10 ** TOKEN_DECIMALS;
-}
-
-/**
- * Start watching a clip. Calls `onTick` each paid second. Returns a handle
- * whose `stop()` performs a graceful stop + cooperative close (settle + refund).
- */
-export async function watchClip(
-  clip: Clip,
-  onTick: (t: Tick) => void,
-  onEnd: () => void,
-): Promise<WatchHandle> {
-  if (!VIEWER_KEY) throw new Error("VITE_VIEWER_PRIVATE_KEY not set");
-  const account = privateKeyToAccount(VIEWER_KEY);
-  const client = createPublicClient({
-    chain: tempoTestnet as any,
-    transport: http(TEMPO_RPC_URL),
-  });
-
-  const manager = sessionManager({
-    account,
-    client,
-    decimals: TOKEN_DECIMALS,
-    maxDeposit: "0.5",
-    escrow: ESCROW_CONTRACT,
-  });
-
-  const stream = await manager.sse(`${SERVER_URL}/watch/${clip.id}`);
-
-  // Drive the stream in the background; resolve close on graceful end.
+/** Watch a clip as `me`, paying its creator per second. */
+export async function watchClip(clip: Clip, me: DemoUser, onTick: (t: Tick) => void, onEnd: () => void): Promise<WatchHandle> {
+  const mgr = manager(me);
+  let stream: AsyncIterable<string>;
+  try {
+    stream = await mgr.sse(`${SERVER_URL}/watch/${clip.id}?as=${me.id}`);
+  } catch (e: any) {
+    throw new Error(`open payment channel for "${clip.title}" failed: ${e?.message ?? e}`);
+  }
   const drained = (async () => {
     for await (const data of stream) {
       try {
         const t = JSON.parse(data) as Tick;
         if (t?.second) onTick(t);
       } catch {
-        /* ignore non-JSON keep-alives */
+        /* keep-alive */
       }
     }
     onEnd();
@@ -136,19 +110,24 @@ export async function watchClip(
 
   return {
     async stop() {
-      // Graceful stop → server ends the stream → final receipt syncs state.
-      await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" });
-      await drained; // wait for the stream to finish + receipt applied
-      const receipt: any = await manager.close();
+      try {
+        await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" });
+      } catch (e: any) {
+        throw new Error(`stop failed: ${e?.message ?? e}`);
+      }
+      await drained;
+      let receipt: any;
+      try {
+        receipt = await mgr.close();
+      } catch (e: any) {
+        throw new Error(`settle/refund failed: ${e?.message ?? e}`);
+      }
       const spentUsd = rawToUsd(receipt?.spent);
-      const depositUsd = 0.5; // suggestedDeposit
       return {
         channelId: receipt?.channelId,
-        spentRaw: receipt?.spent,
         txHash: receipt?.txHash,
         spentUsd,
-        refundUsd:
-          spentUsd != null ? +(depositUsd - spentUsd).toFixed(6) : undefined,
+        refundUsd: spentUsd != null ? +(0.5 - spentUsd).toFixed(6) : undefined,
       };
     },
   };

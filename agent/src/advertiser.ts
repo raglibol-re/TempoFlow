@@ -34,27 +34,32 @@ const TARGET_TAGS = String(f.tags ?? "").split(",").map((s) => s.trim()).filter(
 const log = makeLogger("advertiser");
 
 async function main() {
-  const { account, manager } = makeManager(requireKey("ADVERTISER_PRIVATE_KEY"));
+  // Act as a company; pay a specific viewer for attention.
+  const all = await fetchDemoUsers();
+  const company = all.find((u) => u.kind === "company" && (!f.as || u.id === f.as)) ?? all.find((u) => u.kind === "company");
+  const target = all.find((u) => u.kind === "person" && (!f.to || u.id === f.to)) ?? all.find((u) => u.kind === "person");
+  if (!company || !target) throw new Error("need a company + a person user on the server");
+  const { manager } = makeManager(company.key);
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
-  log.info(`advertiser ${account.address} starting`, { budget: BUDGET, targetTags: TARGET_TAGS });
+  log.info(`advertiser acting as ${company.name} → paying viewer ${target.name}`, { budget: BUDGET, targetTags: TARGET_TAGS });
 
   // 1) Discover attention endpoints (recipient = viewer → these pay viewers).
   const { offers } = await discoverOffers();
   const attentionOffers = offers.filter((o) => o.path.includes("/attention/"));
-  log.info(`discovered ${attentionOffers.length} attention endpoint(s)`, {
-    paths: attentionOffers.map((o) => o.path),
-  });
+  log.info(`discovered ${attentionOffers.length} attention endpoint(s)`, { paths: attentionOffers.map((o) => o.path) });
 
-  // 2) Pick a campaign to run (targeting by tags when provided).
-  const campaigns: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j: any) => j.campaigns ?? []);
+  // 2) Pick this company's campaign (or one matching targeting tags).
+  const campaignList: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j: any) => j.campaigns ?? []);
   const campaign =
-    campaigns.find((c) => !TARGET_TAGS.length || c.tags.some((t) => TARGET_TAGS.includes(t))) ?? campaigns[0];
+    campaignList.find((c) => c.ownerId === company.id) ??
+    campaignList.find((c) => !TARGET_TAGS.length || c.tags.some((t) => TARGET_TAGS.includes(t))) ??
+    campaignList[0];
   if (!campaign) {
     log.info("no campaign available — exiting");
     return;
   }
   const pricePerSec = Number(campaign.pricePerSec);
-  log.info(`running campaign "${campaign.id}" — paying viewers $${pricePerSec}/sec for proven attention`);
+  log.info(`running campaign "${campaign.id}" — paying ${target.name} $${pricePerSec}/sec for proven attention`);
 
   // 3) Stream payment to the viewer while attention is fresh; stop at budget
   //    or after a stretch of no attention (idle) — no point paying to wait.
@@ -64,8 +69,8 @@ async function main() {
   let lastPaid = Date.now();
   const receipt = await runPaidStream({
     manager,
-    url: `${SERVER}/attention/${campaign.id}`,
-    stopUrl: `${SERVER}/attention/${campaign.id}/stop`,
+    url: `${SERVER}/attention/${campaign.id}/${target.id}`,
+    stopUrl: `${SERVER}/attention/${campaign.id}/${target.id}/stop`,
     onFrame: (fr) => {
       if (fr.type === "paid") {
         paid = fr.paidUsd;
