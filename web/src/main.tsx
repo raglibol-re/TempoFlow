@@ -223,6 +223,7 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
   const [attention, setAttention] = useState(true);
   const [earned, setEarned] = useState(0);
   const [paying, setPaying] = useState(false);
+  const [started, setStarted] = useState(false); // payment channel open + actually paying
   const baseline = useRef<number | null>(null);
   const prev = useRef(0);
   const video = useRef<HTMLVideoElement | null>(null);
@@ -235,7 +236,8 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
     return () => { clearInterval(beat); clearInterval(pump); };
   }, [attention, ad.id, me.id]);
 
-  // Poll my on-chain earnings → delta since this ad opened.
+  // Poll my on-chain earnings → delta since this ad opened. The first non-zero
+  // earning means the advertiser's payment channel is open AND paying.
   useEffect(() => {
     const id = setInterval(async () => {
       try {
@@ -243,18 +245,25 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
         if (baseline.current == null) baseline.current = n.inUsd;
         const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6);
         setPaying(e > prev.current); prev.current = e; setEarned(e);
+        if (e > 0) setStarted(true);
       } catch { /* keep last */ }
     }, 1500);
     return () => clearInterval(id);
   }, [me.id]);
-
-  useEffect(() => { if (attention) video.current?.play().catch(() => {}); else video.current?.pause(); }, [attention]);
 
   const price = Number(ad.pricePerSec);
   const budget = Number(ad.maxBudget);
   const spent = ad.spentUsd ?? 0;
   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
   const funded = ad.funded ?? budget - spent >= price;
+  const live = attention && started && funded; // channel open, paying, attentive
+
+  // Play the ad ONLY while it's actually being paid for (never before the channel
+  // opens, and not after funding runs out).
+  useEffect(() => {
+    if (live) video.current?.play().catch(() => {});
+    else video.current?.pause();
+  }, [live]);
 
   return (
     <div className="page">
@@ -263,11 +272,16 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
         <div>
           <div className="player ad">
             {ad.hasVideo
-              ? <video ref={video} src={videoSrc(ad.id)} loop muted playsInline style={{ opacity: attention ? 1 : 0.4 }} />
-              : <span className="emoji" style={{ opacity: attention ? 1 : 0.4 }}>{ad.thumb ?? "📣"}</span>}
+              ? <video ref={video} src={videoSrc(ad.id)} loop muted playsInline style={{ opacity: live ? 1 : 0.35 }} />
+              : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
-            {!attention && <div className="ov">🙈 looked away — you’re not earning</div>}
-            {!funded && <div className="ov">⛔ This ad is out of funding — it can’t pay right now.</div>}
+            {!funded
+              ? <div className="ov">⛔ This ad is out of funding — it can’t pay, so it won’t play.</div>
+              : !attention
+              ? <div className="ov">🙈 looked away — paused, you’re not earning</div>
+              : !started
+              ? <div className="ov">⏳ opening payment channel on Tempo… the ad starts when the money does (~3–6s)</div>
+              : null}
           </div>
           <div className="w-title">{ad.title ?? ad.advertiser}</div>
           <div className="w-chan">
@@ -291,7 +305,7 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
             <button className={attention ? "btn btn-ghost" : "btn"} style={{ flex: 1 }} onClick={() => setAttention((a) => !a)}>{attention ? "Look away 🙈" : "Look back 👀"}</button>
             <button className="btn btn-ghost" onClick={onBack}>Stop</button>
           </div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{!funded ? "⛔ unfunded — ask the advertiser to fund it" : attention ? (paying ? "👀 attention proven — being paid" : "👀 connecting advertiser payer…") : "🙈 paused — look back to keep earning"}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{!funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !started ? "⏳ opening payment channel — the ad starts once you’re being paid" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
         </div>
       </div>
     </div>
