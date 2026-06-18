@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, fundWallet, pathUsdBalance } from "@flow/shared";
 import { mppx, operatorAddress } from "./config.js";
-import { initUsers, users, getUser, publicUser } from "./users.js";
+import { initUsers, users, getUser, publicUser, reloadUsers } from "./users.js";
 import {
   initContent,
   getClips,
@@ -31,6 +31,7 @@ import {
   addCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
+import { userInsert } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
 
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
@@ -153,6 +154,29 @@ app.post("/demo/fund", async (c) => {
     return c.json({ error: (e as Error).message }, 500);
   }
 });
+/** Register a connected Tempo account (login with your own wallet). Address only
+ *  — the private key stays in the browser; the server just needs the address to
+ *  set recipients + attribute ledger flows. */
+app.post("/users", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const address = String(b?.address ?? "");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return c.json({ error: "bad address" }, 400);
+  const role = ["viewer", "creator", "advertiser"].includes(b?.role) ? b.role : "creator";
+  const id = `me-${address.slice(2, 10).toLowerCase()}`;
+  const user = { id, name: String(b?.name ?? "My Tempo Account"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: "🪪", address: address as `0x${string}`, key: "" as `0x${string}` };
+  userInsert(user);
+  reloadUsers();
+  return c.json({ user: publicUser(user) });
+});
+
+/** Live on-chain pathUSD balance for a user/address. */
+app.get("/balance", async (c) => {
+  const as = c.req.query("as");
+  const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
+  if (!address) return c.json({ error: "no address" }, 400);
+  return c.json({ address, balance: await pathUsdBalance(address as `0x${string}`) });
+});
+
 /** Admin: list all users with live on-chain balances. */
 app.get("/admin/users", async (c) => {
   const rows = await Promise.all(

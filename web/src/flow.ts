@@ -92,6 +92,17 @@ export interface NetSnapshot {
   events: { id: string; direction: "in" | "out"; amount: string; counterparty: string; contentId: string }[];
 }
 export const fetchNet = (as: string) => jget(`/net?as=${as}`, "load balance") as Promise<NetSnapshot>;
+export const fetchBalance = (as: string) => jget(`/balance?as=${as}`, "load wallet").then((j) => (j.balance ?? 0) as number);
+
+/** Log in with your own Tempo wallet (testnet private key → registered + usable). */
+export async function connectTempoAccount(privateKey: string, role: "viewer" | "creator" = "creator"): Promise<DemoUser> {
+  const key = (privateKey.trim().startsWith("0x") ? privateKey.trim() : "0x" + privateKey.trim()) as `0x${string}`;
+  let address: `0x${string}`;
+  try { address = privateKeyToAccount(key).address; } catch { throw new Error("invalid private key"); }
+  const reg = await jpost("/users", { address, role, name: "My Tempo Account", handle: `you-${address.slice(2, 6)}` }, "register account");
+  const u = reg.user;
+  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: "🪪", address, key };
+}
 
 /** Upload a clip with a real video file (multipart). */
 export async function uploadClip(as: string, title: string, tags: string[], file: File, durationSec: number): Promise<Clip> {
