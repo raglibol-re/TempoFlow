@@ -13,7 +13,7 @@ import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchAdminUsers, fundUser,
-  resetNet, sendHeartbeat, runAd, createCampaign, uploadClip, watchClip, videoSrc,
+  resetNet, sendHeartbeat, runAd, createCampaign, uploadClip, watchClip, videoSrc, diagnose,
   type DemoUser, type AdminUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
 } from "./flow";
 
@@ -133,7 +133,10 @@ function ClipCard({ clip, me, lowFunds, onError }: { clip: Clip; me: DemoUser; l
           if (lowFunds && t.spentUsd >= LOW_FUNDS_CAP && !capping.current) { capping.current = true; closeOut("out-of-funds"); }
         },
         (r) => { if (!capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
-    } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); }
+    } catch (e: any) {
+      onError(e?.message ?? String(e)); setPhase("idle");
+      diagnose("watch-open-failed", { clip: clip.id, me: me.id, err: String(e?.message ?? e) }).catch(() => {});
+    }
   }
   async function closeOut(why: "ended" | "out-of-funds") {
     if (!handle.current) return;

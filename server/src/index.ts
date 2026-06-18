@@ -91,6 +91,13 @@ app.post("/reset", (c) => {
   ledger.reset();
   return c.json({ ok: true });
 });
+/** Browser self-diagnostics sink (logs to server console so we can see what the
+ *  browser can/can't reach). */
+app.post("/debug", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  console.log("[browser-debug]", JSON.stringify(b));
+  return c.json({ ok: true });
+});
 
 // ── Test funds (faucet) + admin add-funds ───────────────────────────────────
 app.post("/demo/fund", async (c) => {

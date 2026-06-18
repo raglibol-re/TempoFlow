@@ -48,6 +48,22 @@ export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;
 
+/** Browser-side reachability self-test → reported to the server log (/debug). */
+export async function diagnose(context: string, extra: Record<string, unknown> = {}) {
+  const probe = async (label: string, fn: () => Promise<any>) => {
+    try { return { label, ok: true, ...(await fn()) }; }
+    catch (e: any) { return { label, ok: false, error: String(e?.name ?? "") + ": " + String(e?.message ?? e) }; }
+  };
+  const server = await probe("server-health", async () => ({ status: (await fetch(`${SERVER_URL}/health`)).status }));
+  const rpc = await probe("rpc-chainId(browser→RPC)", async () => {
+    const r = await fetch(TEMPO_RPC_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 }) });
+    return { status: r.status, chainId: (await r.json())?.result };
+  });
+  const report = { context, extra, href: location.href, serverUrl: SERVER_URL, rpcUrl: TEMPO_RPC_URL, server, rpc };
+  fetch(`${SERVER_URL}/debug`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(report) }).catch(() => {});
+  return report;
+}
+
 export interface NetSnapshot {
   inUsd: number; outUsd: number; netUsd: number;
   events: { id: string; direction: "in" | "out"; amount: string; counterparty: string; contentId: string }[];
