@@ -46,7 +46,7 @@ async function main() {
   });
 
   // 2) Pick a campaign to run (targeting by tags when provided).
-  const campaigns: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j) => j.campaigns ?? []);
+  const campaigns: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j: any) => j.campaigns ?? []);
   const campaign =
     campaigns.find((c) => !TARGET_TAGS.length || c.tags.some((t) => TARGET_TAGS.includes(t))) ?? campaigns[0];
   if (!campaign) {

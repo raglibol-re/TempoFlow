@@ -30,11 +30,19 @@ export function flags(): Record<string, string | boolean> {
   const a = process.argv.slice(2);
   for (let i = 0; i < a.length; i++) {
     const t = a[i];
-    if (!t.startsWith("--")) continue;
+    if (!t || !t.startsWith("--")) continue;
     const eq = t.indexOf("=");
-    if (eq !== -1) out[t.slice(2, eq)] = t.slice(eq + 1);
-    else if (a[i + 1] && !a[i + 1].startsWith("--")) out[t.slice(2)] = a[++i];
-    else out[t.slice(2)] = true;
+    if (eq !== -1) {
+      out[t.slice(2, eq)] = t.slice(eq + 1);
+      continue;
+    }
+    const next = a[i + 1];
+    if (next && !next.startsWith("--")) {
+      out[t.slice(2)] = next;
+      i++;
+    } else {
+      out[t.slice(2)] = true;
+    }
   }
   return out;
 }

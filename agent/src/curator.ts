@@ -46,8 +46,8 @@ async function main() {
   });
 
   // 2) Inventory: clips to watch + campaigns to earn from.
-  const clips: Clip[] = await fetch(`${SERVER}/feed`).then((r) => r.json()).then((j) => j.clips ?? []);
-  const campaigns: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j) => j.campaigns ?? []);
+  const clips: Clip[] = await fetch(`${SERVER}/feed`).then((r) => r.json()).then((j: any) => j.clips ?? []);
+  const campaigns: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j: any) => j.campaigns ?? []);
 
   // Rank clips by preference (tag overlap first).
   const ranked = [...clips].sort(

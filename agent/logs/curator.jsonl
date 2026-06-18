@@ -1,0 +1,10 @@
+{"t":"2026-06-18T02:36:24.635Z","agent":"curator","kind":"info","msg":"curator 0xa75CB925c63e2483ceC91C0CaB569e39c0F38944 starting","budget":0.03,"watchSecs":4,"prefTags":["nature music"]}
+{"t":"2026-06-18T02:36:24.737Z","agent":"curator","kind":"info","msg":"discovered 2 offers on http://localhost:3000","paths":["/watch/{contentId} (0x07bAc4…)","/attention/{campaignId} (0xa75CB9…)"],"categories":["media","attention","creator-economy"]}
+{"t":"2026-06-18T02:36:24.752Z","agent":"curator","kind":"info","msg":"watching \"Aurora over Tromsø (4K timelapse)\" @nordlys.studio for up to 4s"}
+{"t":"2026-06-18T02:36:26.143Z","agent":"curator","kind":"payment","direction":"out","amount":0.002,"counterparty":"nordlys.studio","contentId":"clip-aurora"}
+{"t":"2026-06-18T02:36:27.251Z","agent":"curator","kind":"payment","direction":"out","amount":0.002,"counterparty":"nordlys.studio","contentId":"clip-aurora"}
+{"t":"2026-06-18T02:36:28.373Z","agent":"curator","kind":"payment","direction":"out","amount":0.002,"counterparty":"nordlys.studio","contentId":"clip-aurora"}
+{"t":"2026-06-18T02:36:29.489Z","agent":"curator","kind":"payment","direction":"out","amount":0.002,"counterparty":"nordlys.studio","contentId":"clip-aurora"}
+{"t":"2026-06-18T02:36:31.844Z","agent":"curator","kind":"info","msg":"closed \"Aurora over Tromsø (4K timelapse)\" — paid $0.0080, refunded rest","txHash":"0x243a00aa2f953eb3ed49efa74a41b169609207c826e8aa5dd9e9ba55ce594e91","netRemaining":0.022}
+{"t":"2026-06-18T02:36:32.369Z","agent":"curator","kind":"info","msg":"watching \"Late-night synthwave session\" @neon.audio for up to 4s"}
+{"t":"2026-06-18T02:36:32.380Z","agent":"curator","kind":"info","msg":"error: Invalid session transition: closed + challengeReceived"}
