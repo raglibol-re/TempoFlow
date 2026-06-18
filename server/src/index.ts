@@ -80,8 +80,8 @@ app.get("/health", (c) => c.json({ ok: true, service: "flow-server" }));
 app.get("/users", (c) => c.json({ users: users.map(publicUser) }));
 /** TESTNET ONLY: keys for the local account switcher. */
 app.get("/demo/users", (c) => c.json({ users }));
-app.get("/feed", (c) => c.json({ clips }));
-app.get("/campaigns", (c) => c.json({ campaigns }));
+app.get("/feed", (c) => c.json({ clips: getClips() }));
+app.get("/campaigns", (c) => c.json({ campaigns: getCampaigns() }));
 app.get("/net", (c) => {
   const as = c.req.query("as");
   const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
@@ -92,8 +92,54 @@ app.post("/reset", (c) => {
   return c.json({ ok: true });
 });
 
-// ── Creator / company content management ────────────────────────────────────
+// ── Test funds (faucet) + admin add-funds ───────────────────────────────────
+app.post("/demo/fund", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const user = getUser(String(b?.userId ?? ""));
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  try {
+    const tx = await fundWallet(user.address, "5");
+    const balance = await pathUsdBalance(user.address);
+    return c.json({ ok: true, tx, balance });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
+/** Admin: list all users with live on-chain balances. */
+app.get("/admin/users", async (c) => {
+  const rows = await Promise.all(
+    users.map(async (u) => ({ ...publicUser(u), balance: await pathUsdBalance(u.address) })),
+  );
+  return c.json({ users: rows });
+});
+
+// ── Creator content management (video upload) ───────────────────────────────
 app.post("/clips", async (c) => {
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("multipart/form-data")) {
+    const body = await c.req.parseBody();
+    const as = String(body.as ?? "");
+    if (!getUser(as)) return c.json({ error: "unknown user" }, 400);
+    const file = body.video as File | undefined;
+    let hasVideo = false;
+    let videoPath: string | undefined;
+    if (file && typeof file !== "string") {
+      mkdirSync(uploadsDir, { recursive: true });
+      const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
+      videoPath = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      writeFileSync(join(uploadsDir, videoPath), Buffer.from(await file.arrayBuffer()));
+      hasVideo = true;
+    }
+    const clip = addClip({
+      ownerId: as,
+      title: String(body.title ?? file?.name ?? "Untitled"),
+      tags: String(body.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      durationSec: body.durationSec ? Number(body.durationSec) : undefined,
+      hasVideo,
+      videoPath,
+    });
+    return c.json({ clip });
+  }
   const b = await c.req.json().catch(() => ({}));
   if (!getUser(b?.as)) return c.json({ error: "unknown user" }, 400);
   const clip = addClip({
@@ -103,6 +149,39 @@ app.post("/clips", async (c) => {
     durationSec: b.durationSec ? Number(b.durationSec) : undefined,
   });
   return c.json({ clip });
+});
+
+// ── Serve uploaded video (HTTP range support for <video>) ───────────────────
+app.get("/video/:id", (c) => {
+  const clip = getClip(c.req.param("id")) as any;
+  if (!clip?.videoPath) return c.json({ error: "no video for this clip" }, 404);
+  const path = join(uploadsDir, clip.videoPath);
+  if (!existsSync(path)) return c.json({ error: "file missing" }, 404);
+  const total = statSync(path).size;
+  const ext = clip.videoPath.split(".").pop()?.toLowerCase() ?? "mp4";
+  const ctype = MIME[ext] ?? "application/octet-stream";
+  const origin = c.req.header("origin") ?? "*";
+  const range = c.req.header("range");
+  if (range) {
+    const m = /bytes=(\d+)-(\d*)/.exec(range);
+    const start = m ? Number(m[1]) : 0;
+    const end = m && m[2] ? Number(m[2]) : total - 1;
+    const stream = Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream;
+    return new Response(stream, {
+      status: 206,
+      headers: {
+        "Content-Range": `bytes ${start}-${end}/${total}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(end - start + 1),
+        "Content-Type": ctype,
+        "Access-Control-Allow-Origin": origin,
+      },
+    });
+  }
+  const stream = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream;
+  return new Response(stream, {
+    headers: { "Content-Length": String(total), "Content-Type": ctype, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": origin },
+  });
 });
 app.post("/campaigns", async (c) => {
   const b = await c.req.json().catch(() => ({}));
@@ -264,7 +343,7 @@ async function start() {
 
   const port = Number(process.env.SERVER_PORT ?? 3000);
   serve({ fetch: app.fetch, port });
-  console.log(`[flow-server] listening on http://localhost:${port} — ${users.length} users, ${clips.length} clips`);
+  console.log(`[flow-server] listening on http://localhost:${port} — ${users.length} users, ${getClips().length} clips`);
 }
 
 start();

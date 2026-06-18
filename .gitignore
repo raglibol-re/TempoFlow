@@ -6,6 +6,9 @@ dist/
 logs/
 *.jsonl
 .users.json
+flow.db
+flow.db-*
+uploads/
 *.sqlite
 *.sqlite-journal
 .wallets/

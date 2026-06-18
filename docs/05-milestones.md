@@ -25,7 +25,6 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | P4.3 | Curator "leave-it-running" process | done (capable) | budget/Ctrl-C stop + JSONL audit trail; run long for the 48h proof |
 | P5.1 | Money-flow animation + net-balance meter + receipts view | done | directional flow lanes (out red / in green), net meter, live receipts feed |
 | P5.2 | Mobile layout, empty/error states, reconnects | done | phone-width layout, loading/error states, net poll auto-retries |
-<<<<<<< HEAD
 | P5.3 | Docs 07/08 + README | done | demo script + pitch finalized w/ real numbers; README refreshed (GIF still TODO) |
 | P6.1 | Seed data, demo mode, fallbacks, reset | partial | reset button; seeded users/clips/campaigns; demo keys persisted |
 | P6.2 | Dress rehearsal vs 07-demo-script.md | todo | — |
@@ -41,8 +40,3 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | MU.5 | Advertiser pays a chosen viewer (path-based, voucher-POST safe) | done | agent paid Alice $0.04 continuously (fixed query-strip bug) |
 | MU.6 | Web account switcher + role dashboards + flow animation | done | Home/Studio/Earn (person), Campaigns (company) |
 | MU.7 | In-browser ads (server spawns advertiser agent) | done | watcher earned $0.02 in-browser via spawned advertiser (stdio piped) |
-=======
-| P5.3 | Docs 07/08 + README | done | demo script + pitch finalized w/ real numbers; README refreshed |
-| P6.1 | Seed data, demo mode, fallbacks, reset | done | `.users.json` demo wallets, seeded clips/campaigns, `/demo/users`, `/reset`, web reset button, README GIF |
-| P6.2 | Dress rehearsal vs 07-demo-script.md | blocked | needs live Tempo testnet + funded wallets; run pre-flight before presenting |
->>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635

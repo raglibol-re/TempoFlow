@@ -122,7 +122,7 @@ export interface Offer {
 export interface DemoUser {
   id: string;
   name: string;
-  kind: "person" | "company";
+  role: "viewer" | "creator" | "advertiser" | "admin";
   handle: string;
   avatar: string;
   address: `0x${string}`;

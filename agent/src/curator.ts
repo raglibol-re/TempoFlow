@@ -34,11 +34,12 @@ const MAX_PER_MIN = Number(f.maxPerMinute ?? "0.05");
 const log = makeLogger("curator");
 
 async function main() {
-  // Act as a real platform user (person). --as <id> selects which.
-  const people = (await fetchDemoUsers()).filter((u) => u.kind === "person");
-  const meId = String(f.as ?? people[0]?.id ?? "");
+  // Act as a viewer (the watcher). --as <id> selects which.
+  const all = await fetchDemoUsers();
+  const people = all.filter((u) => u.role === "viewer" || u.role === "creator");
+  const meId = String(f.as ?? all.find((u) => u.role === "viewer")?.id ?? people[0]?.id ?? "");
   const me = people.find((u) => u.id === meId) ?? people[0];
-  if (!me) throw new Error("no person users on server");
+  if (!me) throw new Error("no viewer/creator users on server");
   const key = me.key;
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
   log.info(`curator acting as ${me.name} (@${me.handle}) ${me.address}`, { budget: BUDGET, watchSecs: WATCH_SECS, prefTags: PREF_TAGS });

@@ -40,7 +40,6 @@ pnpm wallets:setup          # generate + fund testnet wallets, writes .env (TEST
 pnpm dev                    # ONE COMMAND → server :3000 + web :5173
 ```
 
-<<<<<<< HEAD
 Open **http://localhost:5173** (a multi-user, YouTube/Twitch-style dashboard):
 - **Account switcher** (top-right avatars): be any of the demo users — people (watch + post)
   or companies (run ads). Each has its own funded Tempo wallet; you pay/earn as them.
@@ -54,15 +53,6 @@ Open **http://localhost:5173** (a multi-user, YouTube/Twitch-style dashboard):
 > If the page ever shows a stale error after a code change, hard-refresh (Ctrl+Shift+R) —
 > the dev server hot-reloads and old tabs can hold a dead connection. The app now reports
 > the exact failing step rather than a generic "failed to fetch".
-=======
-Open **http://localhost:5173**:
-- **Watch** a clip → money streams **out** to the creator per second; **Skip** → settle
-  on-chain + refund. The collab clip shows a 70/20/10 split.
-- Run the advertiser (`pnpm --filter @flow/server spike:attention`), then toggle
-  **Look away / Look back** on the ad card → money streams **in** only while you're watching.
-- For a no-env local demo, the server creates funded demo users in `.users.json` and the
-  browser falls back to the first demo viewer automatically.
->>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
 
 **Autonomous agents** (the leave-it-running wow):
 ```bash
