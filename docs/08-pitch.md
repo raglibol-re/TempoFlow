@@ -43,5 +43,6 @@ with collab splits; `/openapi.json` discovery (validated); two autonomous budget
 on-chain settlement; a real-time money-flow UI with on-chain receipts.
 
 ## Ask
-[Fill in: what we want from judges / next steps — e.g. feedback, prize track, intros to
-creator/ad partners, mainnet pilot.]
+We want help turning the demo into a pilot: feedback on the incentive design, intros to
+creator/ad partners who care about transparent attention markets, and a path to a Tempo
+mainnet pilot once MPP session splits and production identity controls are ready.

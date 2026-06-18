@@ -10,9 +10,24 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
+<<<<<<< HEAD
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, resetNet, sendHeartbeat,
   postClip, createCampaign, runAd, watchClip,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
+=======
+  fetchFeed,
+  fetchCampaigns,
+  fetchNet,
+  getViewerInfo,
+  resetNet,
+  sendHeartbeat,
+  watchClip,
+  type ViewerInfo,
+  type Tick,
+  type CloseSummary,
+  type WatchHandle,
+  type NetSnapshot,
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
 } from "./flow";
 
 const FLOW_CSS = `
@@ -42,6 +57,7 @@ function App() {
   const [feed, setFeed] = useState<Clip[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [net, setNet] = useState<NetSnapshot | null>(null);
+  const [viewer, setViewer] = useState<ViewerInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"home" | "studio" | "earn">("home");
 
@@ -65,16 +81,29 @@ function App() {
   const me = users.find((u) => u.id === meId);
 
   useEffect(() => {
+<<<<<<< HEAD
     fetchUsers().then((us) => { setUsers(us); setMeId(us.find((u) => u.kind === "person")?.id ?? us[0]?.id ?? ""); }).catch((e) => setError(String(e.message ?? e)));
     fetchFeed().then(setFeed).catch((e) => setError(String(e.message ?? e)));
+=======
+    getViewerInfo().then(setViewer).catch((e) => setError(String(e)));
+    fetchFeed().then(setClips).catch((e) => setError(String(e)));
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
     fetchCampaigns().then(setCampaigns).catch(() => {});
   }, []);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (!me) return;
     const id = setInterval(() => fetchNet(me.id).then(setNet).catch(() => {}), 1000);
     return () => clearInterval(id);
   }, [meId]);
+=======
+    const load = () => fetchNet(viewer?.address).then(setNet).catch(() => {});
+    load();
+    const id = setInterval(load, 1000);
+    return () => clearInterval(id);
+  }, [viewer?.address]);
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
 
   // ad heartbeats + (re)start the advertiser while watching
   useEffect(() => {
@@ -130,6 +159,16 @@ function App() {
   return (
     <div style={s.page}>
       <style>{FLOW_CSS}</style>
+<<<<<<< HEAD
+=======
+      <div style={styles.phone}>
+        <header style={styles.header}>
+          <h1 style={{ margin: 0, fontSize: 22 }}>FLOW</h1>
+          <span style={{ fontSize: 11, opacity: 0.6 }}>
+            {viewer ? `${viewer.handle} · ${viewer.address.slice(0, 6)}…${viewer.address.slice(-4)}` : "loading viewer"}
+          </span>
+        </header>
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
 
       {/* Top bar */}
       <div style={s.topbar}>

@@ -11,3 +11,4 @@ logs/
 .wallets/
 .DS_Store
 .vite/
+__pycache__/

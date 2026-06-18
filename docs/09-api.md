@@ -12,8 +12,13 @@
 | `/watch/:contentId/stop` | POST | free | — | graceful stop: ends the stream so the final receipt is emitted (enables clean close + refund) | no |
 | `/attention/:campaignId` | GET (SSE) + POST | `$0.004`/sec (`tempo` session) | **Viewer** | 402 → channel open (server = operator) → per-sec vouchers, **charged only while heartbeat is fresh (TTL 2.5s)**. GET streams `paid`/`paused` frames; POST = voucher management | yes (`x-payment-info`) |
 | `/attention/:campaignId/stop` | POST | free | — | graceful stop (final receipt → clean close) | no |
+<<<<<<< HEAD
 | `/heartbeat` | POST | free | — | `{campaignId, viewer}` → marks that viewer's attention fresh (gate input) | no |
 | `/feed` | GET | free | — | list clips (all channels) | no |
+=======
+| `/heartbeat` | POST | free | — | `{campaignId, viewer}` → marks attention fresh for that viewer (gate input) | no |
+| `/feed` | GET | free | — | list clips | no |
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
 | `/campaigns` | GET | free | — | list ad campaigns | no |
 | `/users` | GET | free | — | public user list (no keys) | no |
 | `/demo/users` | GET | free | — | **TESTNET demo only**: users incl. keys (account switcher) | no |
@@ -32,7 +37,7 @@ is that clip's owner. `/attention/:campaignId?to=<viewerId>` pays that viewer; t
 ## Heartbeat payload
 ```jsonc
 // POST /heartbeat
-{ "viewer": "0x…", "campaignId": "c1", "visible": true, "inViewport": true, "ts": 1750000000000 }
+{ "viewer": "alice", "campaignId": "camp-tempo", "visible": true, "inViewport": true, "ts": 1750000000000 }
 ```
 
 ## Discovery doc shape (target)

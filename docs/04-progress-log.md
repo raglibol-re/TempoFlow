@@ -188,12 +188,13 @@ manager/channel per clip**. (2) advertiser would hang when attention stopped →
   state for the feed; existing error surface; net poll auto-retries (reconnect-tolerant).
 - **Docs:** [03-agent.md](03-agent.md) written; [07-demo-script.md](07-demo-script.md) and
   [08-pitch.md](08-pitch.md) finalized with the real demo flow + agent numbers; README
-  refreshed (Phases 1–5, DoD checklist). GIF capture still TODO.
+  refreshed (Phases 1–5, DoD checklist). GIF capture remained for Phase 6.
 - All 4 workspaces typecheck; web + server + discovery smoke-tested OK.
 
 **Phases 1–5 complete.** Remaining: Phase 6 demo hardening (seed/demo mode, reset button,
 network fallbacks, dress rehearsal) + capture the README GIF.
 
+<<<<<<< HEAD
 ## 2026-06-18 — Multi-user redesign (YouTube/Twitch-style)
 
 **Failed-fetch (precise):** ruled out backend — server `/health` 200, `/watch` 402 with CORS,
@@ -223,3 +224,20 @@ attention-gated); **companies** get a campaigns view. Money-flow animation + liv
 advertiser agent** as a child process targeting the watching viewer (idle-stops when they leave).
 
 All 4 workspaces typecheck. Operator settlement verified on-chain; multi-creator feed + posting live.
+=======
+## 2026-06-18 (Phase 6 hardening) — demo mode + docs cleanup
+
+- Local `main` was moved onto `origin/main` after preserving the old scaffold history at
+  `backup/pre-origin-main-local`; the divergence was unrelated histories with duplicate
+  initial patches.
+- **Demo identity hardening:** server already creates `.users.json` with funded demo users
+  and serves them at `/demo/users`. Web now falls back to the first demo person when
+  `VITE_VIEWER_PRIVATE_KEY` is absent, and the net meter queries that viewer's address.
+- **Attention spike fix:** `spike:attention` now targets demo viewer `alice` by default
+  (`DEMO_VIEWER_ID` override) and sends viewer-scoped heartbeats, matching the server API.
+- **Docs:** milestone table, runbook, API heartbeat payload, README status, and pitch ask
+  updated. Added a small README demo GIF asset.
+
+**Remaining manual step:** live dress rehearsal against Tempo testnet with funded wallets,
+because it requires network/RPC availability and real channel settlement timing.
+>>>>>>> dc9e8e82335de8be6e45fd6c2aa36b73d8da4635
