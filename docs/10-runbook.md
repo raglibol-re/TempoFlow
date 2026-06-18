@@ -38,6 +38,10 @@ Step 2 (`cp .env.example .env`) is optional — `wallets:setup` writes a complet
 The escrow precompile pulls pathUSD without an ERC-20 approval, so no approval step is
 needed (a `shared/src/scripts/approve-escrow.ts` helper exists but is not required).
 
+On first server boot the app also creates `.users.json` with funded demo people and
+companies. The web app can use those demo keys automatically if `VITE_VIEWER_PRIVATE_KEY`
+is not set, which keeps the room demo resilient after a fresh checkout.
+
 ## 4. Run
 
 ```bash
@@ -52,6 +56,7 @@ Individually if preferred:
 pnpm dev:server        # FLOW server on :3000  (GET /health to check)
 pnpm dev:web           # Viewer app on :5173
 pnpm --filter @flow/server spike   # headless Direction-A test (watch 4s → close)
+pnpm --filter @flow/server spike:attention # pays demo viewer `alice`; override with DEMO_VIEWER_ID
 pnpm agent:curator     # Phase 4: autonomous curator agent
 pnpm agent:advertiser  # Phase 4: autonomous advertiser agent
 ```
@@ -76,7 +81,10 @@ pnpm agent:advertiser  # Phase 4: autonomous advertiser agent
 
 ## Demo mode (Phase 6)
 
-- Pre-funded wallets committed to a local `.wallets/` (gitignored) so the room demo
-  needs no live faucet.
-- A **Reset** button restores seed feed + balances.
+- Demo wallets are stored locally in `.users.json` (gitignored) after first boot so the
+  room demo reuses funded testnet wallets.
+- Seed clips/campaigns are rebuilt on boot; `/reset` and the web **reset** button clear
+  the in-memory net ledger before a run.
+- The browser falls back to the first demo person from `/demo/users` when no
+  `VITE_VIEWER_PRIVATE_KEY` is configured.
 - Network fallback: see [07-demo-script.md](07-demo-script.md).

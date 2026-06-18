@@ -17,19 +17,24 @@ import { TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, tempoTestnet } from "@f
 
 const SERVER = process.env.SERVER_URL ?? "http://localhost:3000";
 const CAMPAIGN = "camp-tempo";
+const VIEWER = process.env.DEMO_VIEWER_ID ?? "alice";
 
-function requireKey(name: string): `0x${string}` {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name} (run \`pnpm wallets:setup\`)`);
-  return v as `0x${string}`;
+async function advertiserKey(): Promise<`0x${string}`> {
+  const envKey = process.env.ADVERTISER_PRIVATE_KEY;
+  if (envKey) return envKey as `0x${string}`;
+  const demo = await fetch(`${SERVER}/demo/users`).then((r) => r.json()) as any;
+  const company = demo.users?.find((u: any) => u.kind === "company" && u.id === "tempo")
+    ?? demo.users?.find((u: any) => u.kind === "company");
+  if (!company?.key) throw new Error("Missing ADVERTISER_PRIVATE_KEY and no demo company key is available");
+  return company.key;
 }
 
 async function net() {
-  return (await fetch(`${SERVER}/net`).then((r) => r.json())) as any;
+  return (await fetch(`${SERVER}/net?as=${encodeURIComponent(VIEWER)}`).then((r) => r.json())) as any;
 }
 
 async function main() {
-  const account = privateKeyToAccount(requireKey("ADVERTISER_PRIVATE_KEY"));
+  const account = privateKeyToAccount(await advertiserKey());
   const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
   const manager = sessionManager({
     account,
@@ -46,18 +51,18 @@ async function main() {
       fetch(`${SERVER}/heartbeat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ campaignId: CAMPAIGN }),
+        body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER }),
       }).catch(() => {});
   }, 1000);
   // prime one heartbeat before opening
   await fetch(`${SERVER}/heartbeat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ campaignId: CAMPAIGN }),
+    body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER }),
   });
 
-  console.log(`[adv] advertiser ${account.address} → paying viewer for attention`);
-  const stream = await manager.sse(`${SERVER}/attention/${CAMPAIGN}`, {
+  console.log(`[adv] advertiser ${account.address} → paying ${VIEWER} for attention`);
+  const stream = await manager.sse(`${SERVER}/attention/${CAMPAIGN}?to=${encodeURIComponent(VIEWER)}`, {
     onReceipt: (r: any) => console.log("[adv] receipt spent:", r?.spent),
   });
 

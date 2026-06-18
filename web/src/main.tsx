@@ -15,10 +15,11 @@ import {
   fetchFeed,
   fetchCampaigns,
   fetchNet,
+  getViewerInfo,
   resetNet,
   sendHeartbeat,
   watchClip,
-  viewerAddress,
+  type ViewerInfo,
   type Tick,
   type CloseSummary,
   type WatchHandle,
@@ -62,6 +63,7 @@ function App() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [net, setNet] = useState<NetSnapshot | null>(null);
+  const [viewer, setViewer] = useState<ViewerInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Single active creator watch at a time (seamless switching).
@@ -80,14 +82,17 @@ function App() {
   const campaign = campaigns[0];
 
   useEffect(() => {
+    getViewerInfo().then(setViewer).catch((e) => setError(String(e)));
     fetchFeed().then(setClips).catch((e) => setError(String(e)));
     fetchCampaigns().then(setCampaigns).catch(() => {});
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => fetchNet().then(setNet).catch(() => {}), 1000);
+    const load = () => fetchNet(viewer?.address).then(setNet).catch(() => {});
+    load();
+    const id = setInterval(load, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [viewer?.address]);
 
   useEffect(() => {
     if (!campaign) return;
@@ -158,7 +163,7 @@ function App() {
         <header style={styles.header}>
           <h1 style={{ margin: 0, fontSize: 22 }}>FLOW</h1>
           <span style={{ fontSize: 11, opacity: 0.6 }}>
-            {viewerAddress ? `${viewerAddress.slice(0, 6)}…${viewerAddress.slice(-4)}` : "no key"}
+            {viewer ? `${viewer.handle} · ${viewer.address.slice(0, 6)}…${viewer.address.slice(-4)}` : "loading viewer"}
           </span>
         </header>
 

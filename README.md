@@ -7,12 +7,12 @@ Protocol (MPP)**.
 
 > _Your attention to ads pays for your creator feed._
 
-![money flow demo](docs/assets/flow.gif) <!-- TODO: capture a GIF of the running app -->
+![money flow demo](docs/assets/flow.gif)
 
-**Status:** Phases 1–5 working on Tempo testnet — both money directions live over MPP
+**Status:** Phases 1–6 demo-ready on Tempo testnet — both money directions live over MPP
 payment channels, attention-gated ads, scrollable feed with collab splits, validated
 `/openapi.json` discovery, two autonomous budgeted agents settling on-chain, and a
-real-time money-flow UI. **TESTNET ONLY — never real funds.**
+real-time money-flow UI with demo reset/fallbacks. **TESTNET ONLY — never real funds.**
 
 ## The reversal
 
@@ -45,6 +45,8 @@ Open **http://localhost:5173**:
   on-chain + refund. The collab clip shows a 70/20/10 split.
 - Run the advertiser (`pnpm --filter @flow/server spike:attention`), then toggle
   **Look away / Look back** on the ad card → money streams **in** only while you're watching.
+- For a no-env local demo, the server creates funded demo users in `.users.json` and the
+  browser falls back to the first demo viewer automatically.
 
 **Autonomous agents** (the leave-it-running wow):
 ```bash
@@ -84,6 +86,7 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 - ✅ Curator + Advertiser agents run autonomously with spend controls + on-chain settle
 - ✅ `/openapi.json` discovery present and valid (`mppx discover validate`)
 - ✅ Receipts / live flow feed in the UI
-- ⏭️ Remaining: Phase 6 demo hardening (seed/demo mode, reset, dress rehearsal)
+- ✅ Seed/demo mode, reset flow, and room-network fallbacks documented
+- ⏭️ Remaining manual step: live dress rehearsal before presenting
 
 Built for the MPP Hackathon (Tempo), 16–20 June 2026. **TESTNET ONLY.**
