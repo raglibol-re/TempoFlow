@@ -1,64 +1,51 @@
 /**
- * Multi-user registry (YouTube/Twitch-style). People watch + post; companies
- * run ads. Each user gets a funded Tempo testnet wallet. Persisted to
- * `.users.json` so wallets are stable across dev restarts (funded once).
+ * User registry with distinct roles: viewer, creator, advertiser, admin.
+ * Persisted in SQLite (db.ts). On first run, demo users are generated with
+ * funded Tempo testnet wallets.
  *
- * ⚠️ TESTNET ONLY. Keys live in .users.json (gitignored) and are exposed to the
- * local web app via /demo/users for the account switcher — fine for a demo.
+ * ⚠️ TESTNET ONLY. Keys are stored locally and exposed to the local web app via
+ * /demo/users for login — fine for a demo.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createWallet, fundWallet } from "@flow/shared";
+import { usersCount, usersAll, userInsert, type DbUser } from "./db.js";
 
-export interface DemoUser {
-  id: string;
-  name: string;
-  kind: "person" | "company";
-  handle: string;
-  avatar: string;
-  address: `0x${string}`;
-  key: `0x${string}`;
-}
-
-const FILE = ".users.json";
-
-const DEFS: Omit<DemoUser, "address" | "key">[] = [
-  { id: "alice", name: "Alice Rivera", kind: "person", handle: "nordlys.studio", avatar: "🌌" },
-  { id: "bob", name: "Bob Tan", kind: "person", handle: "neon.audio", avatar: "🎹" },
-  { id: "carol", name: "Carol Nguyen", kind: "person", handle: "wander.eats", avatar: "🍜" },
-  { id: "dao", name: "Deniz Yıldız", kind: "person", handle: "pixel.forge", avatar: "🎮" },
-  { id: "tempo", name: "Tempo Pay", kind: "company", handle: "tempo.pay", avatar: "💸" },
-  { id: "acme", name: "Acme Cloud", kind: "company", handle: "acme.cloud", avatar: "☁️" },
+const DEFS: Omit<DbUser, "address" | "key">[] = [
+  { id: "admin", name: "Flo Admin", role: "admin", handle: "admin", avatar: "🛠️" },
+  { id: "alice", name: "Alice Rivera", role: "creator", handle: "nordlys.studio", avatar: "🌌" },
+  { id: "bob", name: "Bob Tan", role: "creator", handle: "neon.audio", avatar: "🎹" },
+  { id: "carol", name: "Carol Nguyen", role: "creator", handle: "wander.eats", avatar: "🍜" },
+  { id: "dao", name: "Deniz Yıldız", role: "creator", handle: "pixel.forge", avatar: "🎮" },
+  { id: "vera", name: "Vera Holt", role: "viewer", handle: "vera", avatar: "🐧" },
+  { id: "sam", name: "Sam Cole", role: "viewer", handle: "sam", avatar: "🦊" },
+  { id: "tempo", name: "Tempo Pay", role: "advertiser", handle: "tempo.pay", avatar: "💸" },
+  { id: "acme", name: "Acme Cloud", role: "advertiser", handle: "acme.cloud", avatar: "☁️" },
 ];
 
-export const users: DemoUser[] = [];
+export let users: DbUser[] = [];
 
 export async function initUsers(): Promise<void> {
-  if (existsSync(FILE)) {
-    users.push(...(JSON.parse(readFileSync(FILE, "utf8")) as DemoUser[]));
-    console.log(`[users] loaded ${users.length} users from ${FILE}`);
-    return;
-  }
-  console.log(`[users] generating + funding ${DEFS.length} demo wallets…`);
-  for (const d of DEFS) {
-    const w = createWallet();
-    try {
-      await fundWallet(w.address, "5");
-    } catch (e) {
-      console.error(`[users] fund failed for ${d.id}:`, (e as Error).message);
+  if (usersCount() === 0) {
+    console.log(`[users] seeding + funding ${DEFS.length} demo wallets…`);
+    for (const d of DEFS) {
+      const w = createWallet();
+      try {
+        await fundWallet(w.address, "5");
+      } catch (e) {
+        console.error(`[users] fund failed for ${d.id}:`, (e as Error).message);
+      }
+      userInsert({ ...d, address: w.address, key: w.privateKey });
     }
-    users.push({ ...d, address: w.address, key: w.privateKey });
   }
-  writeFileSync(FILE, JSON.stringify(users, null, 2));
-  console.log(`[users] wrote ${FILE}`);
+  users = usersAll();
+  console.log(`[users] ${users.length} users ready`);
 }
 
 export const getUser = (id: string) => users.find((u) => u.id === id);
-export const persons = () => users.filter((u) => u.kind === "person");
-export const companies = () => users.filter((u) => u.kind === "company");
+export const byRole = (role: string) => users.filter((u) => u.role === role);
+export const reloadUsers = () => { users = usersAll(); };
 
-/** Public view (no private key) for general listing. */
-export function publicUser(u: DemoUser) {
+export function publicUser(u: DbUser) {
   const { key, ...rest } = u;
   return rest;
 }

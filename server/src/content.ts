@@ -1,91 +1,80 @@
 /**
- * Content registry: clips (owned by person users) + ad campaigns (owned by
- * companies). Built from the user registry after wallets are ready. Creators
- * can post new clips; companies can create campaigns (in-memory, demo).
+ * Content registry (SQLite-backed): clips owned by creators + campaigns owned by
+ * advertisers. Creators upload clips (with real video); advertisers create campaigns.
  */
 
 import type { Clip, Campaign } from "@flow/shared";
 import { PRICES } from "@flow/shared";
-import { getUser, persons } from "./users.js";
+import { getUser } from "./users.js";
+import {
+  clipsCount, clipsAll, clipById, clipInsert,
+  campaignsCount, campaignsAll, campaignById, campaignInsert,
+} from "./db.js";
 
-export const clips: Clip[] = [];
-export const campaigns: Campaign[] = [];
+const PLATFORM = "0xF10W0000000000000000000000000000000000FE" as `0x${string}`;
 
-let clipSeq = 0;
-let campSeq = 0;
-
-function ownerAddr(id: string): `0x${string}` {
-  const u = getUser(id);
-  if (!u) throw new Error(`unknown user ${id}`);
-  return u.address;
-}
-
-/** Build the seed feed once users (wallets) exist. */
 export function initContent(): void {
-  const seed: Array<Omit<Clip, "recipients" | "pricePerSec"> & { collabId?: string }> = [
-    { id: "clip-aurora", title: "Aurora over Tromsø (4K timelapse)", creator: "nordlys.studio", ownerId: "alice", tags: ["nature", "timelapse", "travel"], durationSec: 120 },
-    { id: "clip-synth", title: "Late-night synthwave session", creator: "neon.audio", ownerId: "bob", tags: ["music", "synthwave", "live"], durationSec: 90 },
-    { id: "clip-speedrun", title: "Any% speedrun — world record attempt", creator: "pixel.forge", ownerId: "dao", tags: ["gaming", "speedrun", "live"], durationSec: 150 },
-    { id: "clip-collab", title: "Street food tour — Bangkok (collab)", creator: "wander.eats × neon.audio", ownerId: "carol", tags: ["food", "travel", "collab"], durationSec: 100, collabId: "bob" },
-  ];
-
-  for (const s of seed) {
-    const recipients =
-      s.collabId != null
+  if (clipsCount() === 0) {
+    const addr = (id: string) => getUser(id)?.address ?? PLATFORM;
+    const handle = (id: string) => getUser(id)?.handle ?? id;
+    const seed: Array<{ id: string; title: string; ownerId: string; tags: string[]; durationSec: number; collabId?: string; thumb: string }> = [
+      { id: "clip-aurora", title: "Aurora over Tromsø (4K timelapse)", ownerId: "alice", tags: ["nature", "timelapse"], durationSec: 120, thumb: "🌌" },
+      { id: "clip-synth", title: "Late-night synthwave session", ownerId: "bob", tags: ["music", "live"], durationSec: 90, thumb: "🎹" },
+      { id: "clip-speedrun", title: "Any% speedrun — WR attempt", ownerId: "dao", tags: ["gaming", "speedrun"], durationSec: 150, thumb: "🎮" },
+      { id: "clip-collab", title: "Street food tour — Bangkok (collab)", ownerId: "carol", tags: ["food", "collab"], durationSec: 100, collabId: "bob", thumb: "🍜" },
+    ];
+    for (const sdef of seed) {
+      const recipients = sdef.collabId
         ? [
-            { recipient: ownerAddr(s.ownerId), percentage: 70, label: getUser(s.ownerId)?.handle ?? "owner" },
-            { recipient: ownerAddr(s.collabId), percentage: 20, label: getUser(s.collabId)?.handle ?? "guest" },
-            { recipient: ("0xF10W0000000000000000000000000000000000FE" as `0x${string}`), percentage: 10, label: "FLOW platform" },
+            { recipient: addr(sdef.ownerId), percentage: 70, label: handle(sdef.ownerId) },
+            { recipient: addr(sdef.collabId), percentage: 20, label: handle(sdef.collabId) },
+            { recipient: PLATFORM, percentage: 10, label: "FLOW platform" },
           ]
-        : [{ recipient: ownerAddr(s.ownerId), percentage: 100, label: getUser(s.ownerId)?.handle ?? "owner" }];
-    const { collabId, ...clip } = s;
-    clips.push({ ...clip, recipients, pricePerSec: PRICES.creatorPerSecond });
-    clipSeq++;
+        : [{ recipient: addr(sdef.ownerId), percentage: 100, label: handle(sdef.ownerId) }];
+      clipInsert({
+        id: sdef.id, title: sdef.title, creator: handle(sdef.ownerId), ownerId: sdef.ownerId,
+        tags: sdef.tags, durationSec: sdef.durationSec, pricePerSec: PRICES.creatorPerSecond,
+        recipients, hasVideo: false, thumb: sdef.thumb, createdAt: Date.now(),
+      });
+    }
   }
-
-  const camps: Array<Omit<Campaign, "pricePerSec" | "maxBudget">> = [
-    { id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", tags: ["fintech", "crypto"] },
-    { id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", tags: ["developer", "cloud"] },
-  ];
-  for (const c of camps) {
-    campaigns.push({ ...c, pricePerSec: PRICES.attentionPerSecond, maxBudget: "1.0" });
-    campSeq++;
+  if (campaignsCount() === 0) {
+    campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "1.0" });
+    campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "1.0" });
   }
 }
 
-export const getClip = (id: string) => clips.find((c) => c.id === id);
-export const getCampaign = (id: string) => campaigns.find((c) => c.id === id);
+export const getClips = () => clipsAll();
+export const getClip = (id: string) => clipById(id);
+export const getCampaigns = () => campaignsAll();
+export const getCampaign = (id: string) => campaignById(id);
 
-/** Creator posts a new clip to their channel. */
-export function addClip(input: { ownerId: string; title: string; tags: string[]; durationSec?: number }): Clip {
+/** Creator posts a clip (optionally with an uploaded video file). */
+export function addClip(input: {
+  ownerId: string; title: string; tags: string[]; durationSec?: number; hasVideo?: boolean; videoPath?: string; thumb?: string;
+}): Clip {
   const owner = getUser(input.ownerId);
   if (!owner) throw new Error("unknown owner");
-  const clip: Clip = {
-    id: `clip-${owner.id}-${++clipSeq}`,
-    title: input.title,
-    creator: owner.handle,
-    ownerId: owner.id,
-    tags: input.tags,
-    durationSec: input.durationSec ?? 60,
-    pricePerSec: PRICES.creatorPerSecond,
+  const id = `clip-${owner.id}-${Date.now().toString(36)}`;
+  const clip = {
+    id, title: input.title, creator: owner.handle, ownerId: owner.id,
+    tags: input.tags, durationSec: input.durationSec ?? 60, pricePerSec: PRICES.creatorPerSecond,
     recipients: [{ recipient: owner.address, percentage: 100, label: owner.handle }],
+    hasVideo: !!input.hasVideo, videoPath: input.videoPath, thumb: input.thumb ?? owner.avatar,
+    createdAt: Date.now(),
   };
-  clips.unshift(clip); // newest first
-  return clip;
+  clipInsert(clip);
+  const { videoPath, createdAt, ...pub } = clip as any;
+  return pub as Clip;
 }
 
-/** Company creates a new ad campaign. */
 export function addCampaign(input: { ownerId: string; tags: string[]; pricePerSec?: string; maxBudget?: string }): Campaign {
   const owner = getUser(input.ownerId);
   if (!owner) throw new Error("unknown owner");
   const camp: Campaign = {
-    id: `camp-${owner.id}-${++campSeq}`,
-    advertiser: owner.name,
-    ownerId: owner.id,
-    tags: input.tags,
-    pricePerSec: input.pricePerSec ?? PRICES.attentionPerSecond,
-    maxBudget: input.maxBudget ?? "1.0",
+    id: `camp-${owner.id}-${Date.now().toString(36)}`, advertiser: owner.name, ownerId: owner.id,
+    tags: input.tags, pricePerSec: input.pricePerSec ?? PRICES.attentionPerSecond, maxBudget: input.maxBudget ?? "1.0",
   };
-  campaigns.unshift(camp);
+  campaignInsert(camp);
   return camp;
 }

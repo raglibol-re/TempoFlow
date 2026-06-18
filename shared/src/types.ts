@@ -2,11 +2,13 @@
 
 export type WalletRole = "viewer" | "creator" | "advertiser";
 
-/** A platform user — a person (watches + posts) or a company (runs ads). */
+export type Role = "viewer" | "creator" | "advertiser" | "admin";
+
+/** A platform user with a distinct role. */
 export interface User {
   id: string;
   name: string;
-  kind: "person" | "company";
+  role: Role;
   handle: string; // @handle / channel name
   avatar: string; // emoji
   address: `0x${string}`;
@@ -23,6 +25,10 @@ export interface Clip {
   /** Recipient wallet(s). One = solo; many = collaboration → split payments. */
   recipients: Split[];
   pricePerSec: string; // USD
+  /** True if a real uploaded video file is stored (served at /video/:id). */
+  hasVideo?: boolean;
+  /** Optional poster emoji/thumbnail hint. */
+  thumb?: string;
 }
 
 /** An advertiser campaign that pays viewers for attention. */
