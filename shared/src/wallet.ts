@@ -66,9 +66,14 @@ export const publicClient = createPublicClient({
 });
 
 /**
- * Fund a wallet with pathUSD on the testnet.
- * Uses the master wallet if configured, otherwise the faucet.
- * Returns the tx hash (master) or faucet response, or null if neither configured.
+ * Fund a wallet with testnet tokens (pathUSD + fee token).
+ *
+ * Primary path: the Tempo testnet faucet precompile via the `tempo_fundAddress`
+ * RPC method (no auth, no keychain — verified working 2026-06-18). Returns the
+ * funding tx hashes. Falls back to a master-wallet transfer or a faucet URL.
+ *
+ * `amountUsd` only applies to the master-transfer fallback; the faucet RPC funds
+ * a fixed testnet allotment.
  */
 export async function fundWallet(
   to: Address,
@@ -78,6 +83,19 @@ export async function fundWallet(
     | `0x${string}`
     | undefined;
   const faucetUrl = process.env.TEMPO_FAUCET_URL;
+
+  // Primary: Tempo testnet faucet precompile.
+  try {
+    const hashes = await publicClient.request({
+      method: "tempo_fundAddress" as any,
+      params: [to] as any,
+    });
+    if (Array.isArray(hashes) && hashes.length > 0) {
+      return `faucet:${hashes[0]}`;
+    }
+  } catch (err) {
+    // fall through to master / faucet-url paths
+  }
 
   if (masterKey) {
     const master = privateKeyToAccount(masterKey);
@@ -93,6 +111,7 @@ export async function fundWallet(
       abi: ERC20_TRANSFER_ABI,
       functionName: "transfer",
       args: [to, amount],
+      chain: tempoTestnet as any,
     });
     return hash;
   }

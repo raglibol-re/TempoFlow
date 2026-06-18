@@ -37,16 +37,64 @@ build prompt or from the MPP docs.
 
 ---
 
-## Open deviations / to-verify against live docs (do not lose track)
+## ADR-005 — Escrow = canonical precompile 0x4d50500…0000, not defaults.ts value
+- **Decision:** Use the TIP-1034 escrow precompile `0x4d50500000000000000000000000000000000000`
+  ("MPP" in ASCII) from mppx `Protocol.ts` for both client and server.
+- **Why:** mppx `tempo/internal/defaults.ts` lists testnet escrow `0xe1c4d3…a336`, but
+  `open()` against it **reverts** on moderato testnet (verified via `eth_call`). The
+  canonical precompile returns a channelId. channelId is derived from the escrow address,
+  so client + server MUST share the same one. **(was DEV-G)**
+- **Date:** 2026-06-18
 
-- **DEV-A:** `unitType: "second"` — docs example uses `"word"`. Per-second billing may
-  require a manual interval + `charge()` loop instead of a generator yield. **Verify.**
-- **DEV-B:** Per-second **splits** may not be supported on the session path (only on
-  one-time `charge`). Fallback: settle to main creator per second, reconcile splits in
-  app logic. **Verify before Phase 3.**
-- **DEV-C:** Exact `stream.charge()` / voucher-needed event name unconfirmed from a single
-  docs fetch. **Verify against installed `mppx` types.**
-- **DEV-D:** `tempo.session.manager` (client) vs `tempo.session` (server method) — naming
-  confirmed across two doc pages but must match the installed package.
-- **DEV-E:** pathUSD decimals assumed 6 (USDC-style) in `wallet.ts` funding. **Verify.**
-- **DEV-F:** RPC URL `https://rpc.testnet.tempo.xyz` is a placeholder. **Verify.**
+## ADR-006 — SSE sessions run with `sse: { poll: true }`
+- **Decision:** Configure the tempo session method with `sse: { poll: true }`.
+- **Why:** mid-stream voucher POSTs arrive in a different request context than the
+  streaming GET. With the default `waitForUpdate` path this crashed ("reserved voucher
+  coverage is no longer available"). `poll` makes the charge loop poll the store. **(DEV-H)**
+- **Status:** crash fixed; voucher-loop still stalls after tick 1 — under investigation.
+- **Date:** 2026-06-18
+
+## ADR-007 — Funding via `tempo_fundAddress` RPC (no keychain)
+- **Decision:** Fund testnet wallets by calling the unauthenticated `tempo_fundAddress`
+  RPC method directly (in `shared/wallet.ts`).
+- **Why:** the `mppx account` CLI uses an OS keychain that errors `Unsupported platform: win32`.
+  The faucet underneath is just `tempo_fundAddress([addr])` — works from plain viem.
+- **Date:** 2026-06-18
+
+---
+
+## Resolved deviations (verified against installed mppx@0.7.0)
+
+- **DEV-A → RESOLVED:** `unitType` is a free string; `'second'` is accepted. Per-tick
+  billing uses `withReceipt(async function*(stream){ await stream.charge(); yield … })`
+  with a manual 1s sleep — no special time API.
+- **DEV-B → RESOLVED (corrected):** splits live on `tempo.charge` and take **absolute
+  per-split amounts** `{amount,recipient,memo?}` (sum < total), NOT percentages. Whether
+  per-second session splits work is still open for Phase 3.
+- **DEV-C → RESOLVED:** `stream.charge()` (SessionController) confirmed; depletion emits
+  the SSE `payment-need-voucher` event.
+- **DEV-D → RESOLVED:** client factory is `sessionManager(...)` (from `mppx/client`);
+  server method is `tempo()` / `mppx.session(...)`.
+- **DEV-E → RESOLVED:** pathUSD decimals = 6 (mppx `defaults.ts`).
+- **DEV-F → RESOLVED:** RPC = `https://rpc.moderato.tempo.xyz` (chainId 42431, verified live).
+
+## ADR-008 — Management POSTs forwarded body-less; graceful stop for close (DEV-I FIX)
+- **Decision:** (a) For management POSTs to `/watch/:id`, forward a body-less request
+  (Authorization header only) to `mppx.session()`. (b) Add a free `POST /watch/:id/stop`
+  that flags the channel so the stream generator returns normally (emitting the final
+  `payment-receipt`) instead of being aborted; the client then `close()`s.
+- **Why:** (a) `@hono/node-server` gives empty POSTs a non-null body, so mppx's
+  `shouldChargePlainResponse` mis-classified voucher top-ups as paid content and charged a
+  spurious tick — `spent` raced to the voucher ceiling, zero headroom, stream hung.
+  (b) `Sse.serve` only emits the receipt at generator *completion*; mid-stream the client's
+  cumulative lagged `spent`, so `close()` signed below `spent` (402). Aborting skips the
+  receipt. A graceful stop emits it, syncing the client so close settles the exact amount.
+- **Evidence:** end-to-end run — $0.002→$0.008 streamed, close `spent 8000`, on-chain txHash,
+  refund 0.492 pathUSD.
+- **Date:** 2026-06-18
+
+## Still open
+
+- **DEV-B (carry):** per-second session splits vs one-time-charge-only — verify Phase 3.
+- **DEV-J:** stop flag is keyed by clip id (one active viewer per clip in the demo). For
+  multi-viewer, key by channelId/viewer. Fine for Phase 1 demo.

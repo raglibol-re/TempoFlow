@@ -3,10 +3,12 @@
 ## Prerequisites
 
 - Node ≥ 20 (repo built/tested on Node 22), `pnpm` (v10+).
-- A funded source of testnet pathUSD: either a **funding master wallet**
-  (`FUNDING_MASTER_PRIVATE_KEY`) or the **Tempo testnet faucet** (`TEMPO_FAUCET_URL`).
+- No faucet config needed: `pnpm wallets:setup` funds wallets via the Tempo testnet
+  `tempo_fundAddress` RPC automatically. (`FUNDING_MASTER_PRIVATE_KEY` / `TEMPO_FAUCET_URL`
+  remain as optional fallbacks.)
 
 > ⚠️ **TESTNET ONLY.** Never put mainnet keys or real funds in `.env`.
+> Network: chainId **42431**, RPC `https://rpc.moderato.tempo.xyz` (verified).
 
 ## 1. Install
 
@@ -27,17 +29,29 @@ See [`.env.example`](../.env.example) for the full schema.
 
 ```bash
 pnpm wallets:setup
-# Prints VIEWER / CREATOR / ADVERTISER addresses + private keys.
-# Paste the *_PRIVATE_KEY lines into .env. Funds each with ~5 pathUSD.
+# Generates VIEWER / CREATOR / ADVERTISER wallets, funds each via tempo_fundAddress,
+# and WRITES .env at the repo root (incl. a random MPP_SECRET_KEY).
+# If .env already exists it is NOT overwritten — it prints the lines to merge.
 ```
 
-If funding is skipped (no master key / faucet), fund the printed addresses manually.
+Step 2 (`cp .env.example .env`) is optional — `wallets:setup` writes a complete `.env`.
+The escrow precompile pulls pathUSD without an ERC-20 approval, so no approval step is
+needed (a `shared/src/scripts/approve-escrow.ts` helper exists but is not required).
 
 ## 4. Run
 
 ```bash
+pnpm dev               # ONE COMMAND: server :3000 + web :5173 (concurrently)
+```
+
+Then open **http://localhost:5173** → click **Watch** (opens a payment channel; money
+flows OUT to the creator per second) → **Skip** (graceful stop → settle on-chain + refund).
+
+Individually if preferred:
+```bash
 pnpm dev:server        # FLOW server on :3000  (GET /health to check)
 pnpm dev:web           # Viewer app on :5173
+pnpm --filter @flow/server spike   # headless Direction-A test (watch 4s → close)
 pnpm agent:curator     # Phase 4: autonomous curator agent
 pnpm agent:advertiser  # Phase 4: autonomous advertiser agent
 ```

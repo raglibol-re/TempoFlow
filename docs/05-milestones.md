@@ -8,13 +8,15 @@ Status: `todo` | `in-progress` | `done` | `blocked`
 | P0.2 | Monorepo + TS + workspaces scaffolded | done | root config, 4 workspaces |
 | P0.3 | Wallet helpers + .env schema | done | [shared/src/wallet.ts](../shared/src/wallet.ts), [.env.example](../.env.example) |
 | P0.4 | Docs 00/01/02/10 first draft + 04/05 started | done | this folder |
-| P0.5 | `pnpm install` + mppx version verified | todo | — |
-| P1.1 | Creator stream endpoint `/watch/:id` (per-sec, recipient=creator) | todo | — |
-| P1.2 | Web: 1 clip, open session, skip = close + refund | todo | — |
-| P1.3 | Direction A acceptance: money flows/sec, skip refunds | todo | — |
-| P2.1 | `/attention/:campaignId` (recipient=viewer) + heartbeat gate | todo | — |
-| P2.2 | Scripted advertiser client streams payment | todo | — |
-| P2.3 | Web: ad card, heartbeats, net-balance rising | todo | — |
+| P0.5 | `pnpm install` + mppx@0.7.0 API verified against source | done | [02](02-mpp-integration.md), [04](04-progress-log.md) |
+| P1.0 | Live testnet wiring: faucet funding + first per-sec micropayment | done | tick `{second:1, spentUsd:0.002}` on Tempo testnet |
+| P1.1 | Creator stream endpoint `/watch/:id` (per-sec, recipient=creator) | done | full ladder $0.002→$0.008; voucher loop fixed (DEV-I) |
+| P1.2 | Web: 1 clip, open session, skip = close + refund | done | `web/` feed card + money-out meter + receipt; `pnpm dev` |
+| P1.3 | Direction A acceptance: money flows/sec, skip settles + refunds | done | close receipt `spent 8000`, txHash on-chain, refund 0.492 |
+| P1.4 | One-command dev (frontend + backend) | done | `pnpm dev` → server :3000 + web :5173 |
+| P2.1 | `/attention/:campaignId` (recipient=viewer, operator) + heartbeat gate + net ledger | done | attention-spike paid to viewer; gate pauses on attention loss |
+| P2.2 | Scripted advertiser client streams payment | done | `attention-spike.ts`: $0.044 paid, close txHash on-chain |
+| P2.3 | Web: ad card, heartbeats, net-balance rising | done | both-direction UI + net meter + flow feed |
 | P3.1 | Scrollable feed, seamless session switch | todo | — |
 | P3.2 | Split payments for collab creators | todo | — |
 | P3.3 | `/openapi.json` discovery + `mppx discover validate` | todo | — |

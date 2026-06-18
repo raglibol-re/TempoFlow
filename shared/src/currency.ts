@@ -8,29 +8,38 @@
  *   - testnet chainId = 42431 (0xa5bf)   [4217 is MAINNET — do not use]
  *   - RPC = https://rpc.moderato.tempo.xyz
  *   - pathUSD = 0x20c0…0000, decimals = 6 (all TIP-20 tokens use 6)
- *   - escrow (testnet) = 0xe1c4d3dce17bc111181ddf716f75bae49e61a336
+ *   - escrow = 0x4d50500000000000000000000000000000000000 (canonical TIP-1034
+ *     "MPP" precompile from mppx Protocol.ts; privileged — needs NO ERC-20
+ *     allowance. NB: mppx defaults.ts lists 0xe1c4d3… for testnet but that
+ *     deployment reverts on open — see docs/06-decisions.md DEV-G.)
  */
 
+/** Safe env read — works in Node and in the browser (no `process`). */
+function env(key: string): string | undefined {
+  if (typeof process !== "undefined" && process.env) return process.env[key];
+  return undefined;
+}
+
 /** Tempo testnet chain id (42431 / 0xa5bf). */
-export const TEMPO_CHAIN_ID = Number(process.env.TEMPO_CHAIN_ID ?? 42431);
+export const TEMPO_CHAIN_ID = Number(env("TEMPO_CHAIN_ID") ?? 42431);
 
 /** Tempo testnet RPC URL. */
 export const TEMPO_RPC_URL =
-  process.env.TEMPO_RPC_URL ?? "https://rpc.moderato.tempo.xyz";
+  env("TEMPO_RPC_URL") ?? "https://rpc.moderato.tempo.xyz";
 
 /** TIP-20 token decimals (pathUSD + all Tempo tokens). */
 export const TOKEN_DECIMALS = 6;
 
-/** Session-channel escrow precompile contract (Tempo testnet). */
+/** Canonical TIP-1034 session-channel escrow precompile ("MPP"). */
 export const ESCROW_CONTRACT =
-  (process.env.TEMPO_ESCROW_CONTRACT ??
-    "0xe1c4d3dce17bc111181ddf716f75bae49e61a336") as `0x${string}`;
+  (env("TEMPO_ESCROW_CONTRACT") ??
+    "0x4d50500000000000000000000000000000000000") as `0x${string}`;
 
 /**
  * pathUSD — the stable micropayment currency on Tempo testnet.
  * All FLOW vouchers are denominated in this token.
  */
-export const PATH_USD = (process.env.FLOW_CURRENCY ??
+export const PATH_USD = (env("FLOW_CURRENCY") ??
   "0x20c0000000000000000000000000000000000000") as `0x${string}`;
 
 /** The currency every FLOW payment channel uses. */
@@ -39,9 +48,9 @@ export const FLOW_CURRENCY = PATH_USD;
 /** Default per-second prices (USD), tunable for the demo. */
 export const PRICES = {
   /** Viewer → Creator, charged per second of watchtime. */
-  creatorPerSecond: process.env.PRICE_CREATOR_PER_SEC ?? "0.002",
+  creatorPerSecond: env("PRICE_CREATOR_PER_SEC") ?? "0.002",
   /** Advertiser → Viewer, charged per second of *proven* attention. */
-  attentionPerSecond: process.env.PRICE_ATTENTION_PER_SEC ?? "0.004",
+  attentionPerSecond: env("PRICE_ATTENTION_PER_SEC") ?? "0.004",
 } as const;
 
 /**

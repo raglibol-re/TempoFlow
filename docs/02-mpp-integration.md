@@ -1,141 +1,136 @@
 # 02 — MPP Integration
 
-> Source of truth: <https://mpp.dev/llms-full.txt> and the `/guides/*` pages.
-> **If the live mppx TypeScript types differ from what's recorded here, the types win** —
-> log the deviation in [06-decisions.md](06-decisions.md) and update this file.
-> Signatures below were extracted from the docs on **2026-06-18** and must be
-> re-verified against the installed `mppx` package before Phase 1 coding.
+> **VERIFIED against the installed `mppx@0.7.0` (wevm) source + a live Tempo testnet
+> run on 2026-06-18.** This supersedes the initial docs-fetch draft, which had several
+> wrong signatures. Where this still says "unverified", treat the installed `.d.ts` as truth.
 
-## Packages
+## Package & entry points (`mppx@0.7.0`)
 
-- `mppx/server` — server-side payment methods + session/charge wrappers.
-- `mppx/hono` — Hono adapter + `discovery()` helper.
-- `mppx/client` — client session manager (used by web app **and** agents).
-- `viem` — account creation/signing (`privateKeyToAccount`, `generatePrivateKey`).
+- `mppx/server` — `Mppx.create`, `tempo()` method, `Store` (namespace), transports.
+- `mppx/hono` — `Mppx.create` returning **Hono middleware** + `discovery()`.
+- `mppx/client` — `sessionManager()`, `tempo()` client method, `Mppx.create`.
+- `mppx/tempo` — `Session` namespace (precompile/protocol internals).
+- Peer deps: **viem ≥ 2.51**, **hono ≥ 4.12.18**. Currency math via viem `parseUnits`.
 
-## Currency / network constants (Tempo testnet)
+## Currency / network constants (Tempo testnet) — VERIFIED
 
-| Constant | Value | Notes |
+| Constant | Value | Source |
 |---|---|---|
-| chainId | `4217` | Tempo testnet (verify) |
-| pathUSD (currency) | `0x20c0000000000000000000000000000000000000` | micropayment token |
-| RPC URL | `TEMPO_RPC_URL` env | verify exact host in runbook |
+| chainId | **42431** (`0xa5bf`) | live `eth_chainId`; 4217 is MAINNET |
+| RPC | `https://rpc.moderato.tempo.xyz` | mppx `defaults.ts`, live |
+| pathUSD | `0x20c0000000000000000000000000000000000000` | `defaults.ts` |
+| decimals | **6** | `defaults.ts` (all TIP-20) |
+| escrow precompile | **`0x4d50500000000000000000000000000000000000`** | `Protocol.ts` (NOT the `0xe1c4…` in `defaults.ts`, which reverts — see [06](06-decisions.md) ADR-005) |
 
 Centralized in [`shared/src/currency.ts`](../shared/src/currency.ts).
 
-## Server setup (extracted signatures)
+## `amount` semantics
+
+`amount` (and `suggestedDeposit`, split amounts) are **human-decimal strings** (e.g.
+`"0.002"`), scaled to raw units by `parseUnits(amount, decimals)` internally.
+
+## Server — per-second streamed session (Direction A)
 
 ```ts
-import { Mppx, tempo } from "mppx/server";
+import { Mppx, tempo, Store } from "mppx/server";
+
+const store = Store.memory(); // shared between method + metering
 
 const mppx = Mppx.create({
+  methods: [tempo({
+    account,                 // viem Account: settlement signer + default recipient
+    recipient: creatorAddr,
+    currency: PATH_USD,
+    decimals: 6,
+    chainId: 42431,
+    escrowContract: "0x4d50500000000000000000000000000000000000",
+    store,
+    getClient: () => settlementWalletClient,
+    sse: { poll: true },     // poll store; mid-stream voucher POSTs are a separate request
+  })],
   secretKey: process.env.MPP_SECRET_KEY,
-  methods: [
-    tempo.session({
-      account,                 // viem Account that signs settlements
-      chainId: 4217,
-      currency: "0x20c0000000000000000000000000000000000000", // pathUSD
-      store: Store.memory(),   // durable store in prod
-    }),
-  ],
 });
-```
 
-### Per-second streamed endpoint (Direction A — creator)
+// Same path serves GET (stream) and POST (open / voucher top-up management).
+app.on(["GET", "POST"], "/watch/:id", async (c) => {
+  const result = await mppx.session({
+    amount: "0.002", currency: PATH_USD, decimals: 6,
+    unitType: "second", chainId: 42431, suggestedDeposit: "0.5",
+  })(c.req.raw);
 
-```ts
-// Price per billable unit. For FLOW, unit = one second of watchtime.
-export const GET = mppx.session({ amount: "0.002", unitType: "second" })(
-  async function* () {
-    for (;;) {
-      await stream.charge();   // charge the viewer for this second
-      yield secondTick();      // emit content frame / keep-alive
+  if (result.status === 402) return result.challenge;             // 402 challenge Response
+  if (c.req.method === "POST") return result.withReceipt(c.json({ ok: true })); // mgmt ack
+
+  return result.withReceipt(async function* (stream) {            // GET → metered stream
+    for (let s = 1; s <= duration; s++) {
+      await stream.charge();   // reserve+commit one tick; emits `payment-need-voucher` if low
+      yield JSON.stringify({ second: s /* … */ });
+      await sleep(1000);
     }
-  },
-);
-// On channel depletion the server emits `event: payment-need-voucher`;
-// the client session tops up transparently.
-```
-
-> ⚠️ **To verify:** exact name/shape of the per-unit charge call (`stream.charge()`),
-> whether `unitType` accepts `"second"` (docs show `"word"`), and the time-based billing
-> hook (we may need a manual `setInterval` + `charge()` loop instead of a generator).
-
-### Attention endpoint (Direction B — recipient = viewer)
-
-Same `mppx.session(...)` wrapper, but the payment method's **recipient is the viewer's
-wallet**, and the handler **only charges while a valid heartbeat exists**:
-
-```ts
-mppx.session({ amount: "0.004", unitType: "second" })(async function* () {
-  for (;;) {
-    if (!hasValidHeartbeat(campaignId)) { yield idle(); continue; } // do NOT charge
-    await stream.charge(); // settle to the VIEWER wallet
-    yield adTick();
-  }
+  });
 });
 ```
 
-### Split payments (collab creators — Phase 3)
+See [`server/src/config.ts`](../server/src/config.ts) and [`server/src/index.ts`](../server/src/index.ts).
+
+## Client — viewer session (also used by the advertiser agent in Direction B)
 
 ```ts
-mppx.charge({
-  amount: "0.002",
-  splits: [
-    { recipient: CREATOR_MAIN,   percentage: 70 },
-    { recipient: CREATOR_COLLAB, percentage: 20 },
-    { recipient: PLATFORM,       percentage: 10 },
-  ],
-});
-```
+import { sessionManager } from "mppx/client";
 
-> ⚠️ **To verify:** whether `splits` is supported on the *session* path (per-second) or
-> only on one-time `charge`. If session-splits aren't supported, we settle per-second to
-> the main creator and reconcile splits in app logic (log decision).
-
-### Discovery
-
-```ts
-import { discovery } from "mppx/hono";
-discovery(app, mppx, { auto: true, info: { title: "FLOW", version: "0.1.0" } });
-// → GET /openapi.json with per-route x-payment-info.offers[] and x-service-info
-// Validate: npx mppx discover validate
-```
-
-## Client session API (web app + agents)
-
-```ts
-import { tempo } from "mppx/client";
-import { privateKeyToAccount } from "viem/accounts";
-
-const session = tempo.session.manager({
-  account: privateKeyToAccount(privateKey),
-  maxDeposit: "1",            // max pathUSD reserved per channel
-  // getClient: provider.getClient   // when using an injected provider
+const manager = sessionManager({
+  account, client,           // viem account + client (RPC resolver)
+  decimals: 6,
+  maxDeposit: "0.5",         // local cap for auto open/top-up (human units)
+  escrow: "0x4d50500000000000000000000000000000000000",
 });
 
-// Stream (Direction A consume, or Direction B advertiser-as-client):
-const stream = await session.sse(`${SERVER}/watch/${contentId}`);
-for await (const chunk of stream) { /* render + animate money flow */ }
+const stream = await manager.sse(`${SERVER}/watch/${id}`, { onReceipt: r => … });
+for await (const data of stream) { /* render + animate money OUT */ }
 
-// One-shot paid request also available:
-// const res = await session.fetch(url);
-
-// Skip / done → settle on-chain + refund unused deposit:
-const receipt = await session.close();
+const receipt = await manager.close(); // settle + refund unused deposit on-chain
+// receipt: { channelId, spent, acceptedCumulative, txHash } (no explicit refund field;
+// refund = deposit − spent, executed by the escrow on close)
 ```
 
-### Challenge → Credential → Receipt (happens transparently inside the session)
+See [`server/src/spike-client.ts`](../server/src/spike-client.ts).
 
-1. Server returns **402** with an `MPP` challenge (price terms, recipient).
-2. Client signs a **credential** (voucher) against the challenge.
-3. Server verifies + returns a **receipt** reference.
-4. Within a session, steps repeat off-chain per second (no on-chain tx per voucher).
+## Challenge → Credential(voucher) → Receipt
 
-## Open questions (tracked in 06-decisions.md)
+1. GET with no credential → **402** + MPP challenge (price terms, recipient, currency).
+2. Client opens the channel **on-chain** (escrow `open(payee, operator, token, deposit,
+   salt, authorizedSigner)`) and signs an initial **voucher** (cumulative amount).
+3. Server verifies, streams; per tick it commits against the authorized cumulative.
+4. When the server's required cumulative exceeds the voucher, it emits
+   `payment-need-voucher`; the client **POSTs a higher voucher** to the same path (off-chain,
+   no tx). On `close()` the highest voucher settles to the recipient on-chain; unused
+   deposit is refunded to the payer.
 
-- Exact time-based billing hook for per-**second** (vs per-word) streaming.
-- Session-level splits vs one-time-only splits.
-- `getClient` requirement for headless agents vs raw viem account.
-- Exact `mppx` package version + whether `npx skills add tempoxyz/mpp` / the MCP server
-  are available in this environment (see Step 0 status in 04-progress-log.md).
+## Direction B (advertising) — role swap
+
+Same machinery; the **advertiser is the client**, and `/attention/:campaignId` is a
+session endpoint whose **recipient = the viewer wallet**. The handler only calls
+`stream.charge()` while a valid heartbeat exists (Phase 2). See [01](01-architecture.md).
+
+## Splits (Phase 3)
+
+`tempo.charge` supports `splits: [{ amount, recipient, memo? }]` with **absolute
+per-split amounts** (sum < total) — NOT percentages. Whether splits apply on the
+per-second *session* path is still to verify (DEV-B in [06](06-decisions.md)).
+
+## Discovery (Phase 3)
+
+`mppx/hono` `discovery(app, mppx, { auto, path, routes, info:{title,version} })` mounts
+`GET /openapi.json`. Programmatic `validate(doc)` from `mppx/discovery`; CLI
+`mppx discover validate <path|url>`.
+
+## Funding (testnet)
+
+Faucet = unauthenticated RPC `tempo_fundAddress([address])` → array of tx hashes. Used by
+[`shared/src/wallet.ts`](../shared/src/wallet.ts) + `pnpm wallets:setup`. (The `mppx
+account` CLI errors `Unsupported platform: win32`.)
+
+## Known open issue
+
+- **DEV-I:** mid-stream voucher top-up loop stalls after tick 1 over SSE (channel opens and
+  the first per-second payment settles fine). See [04](04-progress-log.md) / [06](06-decisions.md).

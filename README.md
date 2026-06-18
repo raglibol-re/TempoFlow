@@ -31,13 +31,15 @@ where pay-per-second-of-attention is economically real.
 
 ```bash
 pnpm install
-cp .env.example .env        # fill MPP_SECRET_KEY + funding (see docs/10-runbook.md)
-pnpm wallets:setup          # generate + fund testnet wallets (TESTNET ONLY)
-pnpm dev:server             # FLOW server  :3000
-pnpm dev:web                # viewer app   :5173
+pnpm wallets:setup          # generate + fund testnet wallets, writes .env (TESTNET ONLY)
+pnpm dev                    # ONE COMMAND → server :3000 + web :5173
 ```
 
-Autonomous agents (Phase 4): `pnpm agent:curator`, `pnpm agent:advertiser`.
+Open **http://localhost:5173**, hit **Watch** (money streams out to the creator per
+second), then **Skip** (settle on-chain + refund the unused deposit).
+
+Headless check: `pnpm --filter @flow/server spike`. Agents (Phase 4):
+`pnpm agent:curator`, `pnpm agent:advertiser`.
 
 ## Architecture
 

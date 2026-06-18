@@ -8,12 +8,16 @@
 | Path | Method | Price / Intent | Recipient role | 402 behavior | Discovery |
 |---|---|---|---|---|---|
 | `/health` | GET | free | — | none | no |
-| `/watch/:contentId` | GET (SSE) | `$0.002`/sec (`tempo` session) | **Creator** | 402 MPP challenge → session open → per-sec vouchers | yes (`x-payment-info`) |
-| `/attention/:campaignId` | GET (SSE) | `$0.004`/sec (`tempo` session) | **Viewer** | 402 → session open → per-sec vouchers, **settled only while heartbeat valid** | yes (`x-payment-info`) |
-| `/heartbeat` | POST | free | — | none (attention proof input) | no |
-| `/feed` | GET | free | — | none | no |
-| `/receipts/:wallet` | GET | free | — | none | no |
-| `/openapi.json` | GET | free | — | none | self |
+| `/watch/:contentId` | GET (SSE) + POST | `$0.002`/sec (`tempo` session) | **Creator** | 402 challenge → channel open → per-sec vouchers. GET streams; POST = voucher/open management (same path, forwarded body-less) | yes (`x-payment-info`) |
+| `/watch/:contentId/stop` | POST | free | — | graceful stop: ends the stream so the final receipt is emitted (enables clean close + refund) | no |
+| `/attention/:campaignId` | GET (SSE) + POST | `$0.004`/sec (`tempo` session) | **Viewer** | 402 → channel open (server = operator) → per-sec vouchers, **charged only while heartbeat is fresh (TTL 2.5s)**. GET streams `paid`/`paused` frames; POST = voucher management | yes (`x-payment-info`) |
+| `/attention/:campaignId/stop` | POST | free | — | graceful stop (final receipt → clean close) | no |
+| `/heartbeat` | POST | free | — | `{campaignId}` → marks attention fresh (gate input) | no |
+| `/feed` | GET | free | — | list clips | no |
+| `/campaigns` | GET | free | — | list ad campaigns | no |
+| `/net` | GET | free | — | viewer net balance `{inUsd,outUsd,netUsd,events[]}` | no |
+| `/reset` | POST | free | — | clear the in-memory net ledger (demo) | no |
+| `/openapi.json` | GET | free | — | discovery (Phase 3) | self |
 
 ## Heartbeat payload
 ```jsonc
