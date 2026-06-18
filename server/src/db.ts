@@ -52,9 +52,14 @@ export interface DbUser {
   name: string;
   role: Role;
   handle: string;
-  avatar: string;
+  avatar: string; // emoji/symbol
   address: `0x${string}`;
   key: `0x${string}`;
+  // ── profile (creator-platform) ──
+  bio?: string;
+  pic?: string;          // uploaded profile-pic filename (served at /pic/:id)
+  banner?: string;       // optional banner color/gradient key
+  followPrice?: string;  // USD price others pay to super-follow this user
 }
 
 // ── Users ───────────────────────────────────────────────────────────────────
@@ -65,12 +70,48 @@ export function usersAll(): DbUser[] {
   return (db.prepare("SELECT * FROM users").all() as any[]).map((r) => ({
     id: r.id, name: r.name, role: r.role, handle: r.handle, avatar: r.avatar,
     address: r.address, key: r.privKey,
+    bio: r.bio || undefined, pic: r.pic || undefined, banner: r.banner || undefined,
+    followPrice: r.followPrice || undefined,
   }));
 }
 export function userInsert(u: DbUser) {
-  db.prepare("INSERT OR REPLACE INTO users (id,name,role,handle,avatar,address,privKey) VALUES (?,?,?,?,?,?,?)")
-    .run(u.id, u.name, u.role, u.handle, u.avatar, u.address, u.key);
+  db.prepare("INSERT OR REPLACE INTO users (id,name,role,handle,avatar,address,privKey,bio,pic,banner,followPrice) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+    .run(u.id, u.name, u.role, u.handle, u.avatar, u.address, u.key,
+      u.bio ?? null, u.pic ?? null, u.banner ?? null, u.followPrice ?? null);
 }
+/** Patch editable profile fields on an existing user (only provided keys). */
+export function userUpdateProfile(id: string, p: Partial<Pick<DbUser, "name" | "handle" | "avatar" | "bio" | "pic" | "banner" | "followPrice">>) {
+  const cols = Object.keys(p).filter((k) => (p as any)[k] !== undefined);
+  if (!cols.length) return;
+  const set = cols.map((c) => `${c}=?`).join(", ");
+  db.prepare(`UPDATE users SET ${set} WHERE id=?`).run(...cols.map((c) => (p as any)[c]), id);
+}
+
+// ── Follows (pay-to-follow) ──────────────────────────────────────────────────
+export interface Follow { follower: string; creator: string; amountUsd: string; txHash: string; createdAt: number }
+export function followInsert(f: Follow) {
+  db.prepare("INSERT OR REPLACE INTO follows (follower,creator,amountUsd,txHash,createdAt) VALUES (?,?,?,?,?)")
+    .run(f.follower, f.creator, f.amountUsd, f.txHash, f.createdAt);
+}
+export function followRemove(follower: string, creator: string) {
+  db.prepare("DELETE FROM follows WHERE follower=? AND creator=?").run(follower, creator);
+}
+export function isFollowing(follower: string, creator: string): boolean {
+  return !!db.prepare("SELECT 1 FROM follows WHERE follower=? AND creator=?").get(follower, creator);
+}
+/** Follower rows for a creator (who supports them), newest first. */
+export function followersOf(creator: string): Follow[] {
+  return db.prepare("SELECT * FROM follows WHERE creator=? ORDER BY createdAt DESC").all(creator) as any[];
+}
+/** Creators a user follows, newest first. */
+export function followingOf(follower: string): Follow[] {
+  return db.prepare("SELECT * FROM follows WHERE follower=? ORDER BY createdAt DESC").all(follower) as any[];
+}
+export const followerCount = (creator: string) => (db.prepare("SELECT COUNT(*) n FROM follows WHERE creator=?").get(creator) as any).n as number;
+export const followingCount = (follower: string) => (db.prepare("SELECT COUNT(*) n FROM follows WHERE follower=?").get(follower) as any).n as number;
+/** Total pathUSD a creator has earned from super-follows. */
+export const followEarnings = (creator: string) =>
+  (db.prepare("SELECT COALESCE(SUM(CAST(amountUsd AS REAL)),0) s FROM follows WHERE creator=?").get(creator) as any).s as number;
 
 // ── Clips ───────────────────────────────────────────────────────────────────
 type ClipRow = Clip & { videoPath?: string };

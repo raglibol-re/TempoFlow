@@ -5,10 +5,10 @@
  */
 
 import { sessionManager } from "mppx/client";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, createWalletClient, http, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
-  TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, tempoTestnet,
+  TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet,
   type Clip, type Campaign, type Role,
 } from "@flow/shared";
 
@@ -33,8 +33,23 @@ export const SERVER_URL = resolveServerUrl();
 export interface DemoUser {
   id: string; name: string; role: Role; handle: string; avatar: string;
   address: `0x${string}`; key: `0x${string}`;
+  // profile (creator-platform)
+  bio?: string; pic?: string; followPrice?: string;
 }
 export interface AdminUser extends Omit<DemoUser, "key"> { balance: number }
+export type PublicUser = Omit<DemoUser, "key">;
+export interface Supporter extends PublicUser { amountUsd: string; since: number }
+export interface Profile {
+  user: PublicUser;
+  balance: number;
+  followerCount: number;
+  followingCount: number;
+  followEarnings: number;
+  supporters: Supporter[];
+  following: Supporter[];
+  clips: Clip[];
+  viewerFollows: boolean;
+}
 
 async function jget(path: string, label: string): Promise<any> {
   try {
@@ -110,6 +125,56 @@ export interface NetSnapshot {
 }
 export const fetchNet = (as: string) => jget(`/net?as=${as}`, "load balance") as Promise<NetSnapshot>;
 export const fetchBalance = (as: string) => jget(`/balance?as=${as}`, "load wallet").then((j) => (j.balance ?? 0) as number);
+
+// ── Profiles + pay-to-follow (super-follow) ──────────────────────────────────
+/** URL for a user's uploaded profile picture (404s → caller falls back to symbol). */
+export const picSrc = (id: string) => `${SERVER_URL}/pic/${id}`;
+export const fetchProfile = (id: string, viewer?: string) =>
+  jget(`/users/${id}/profile${viewer ? `?viewer=${viewer}` : ""}`, "load profile") as Promise<Profile>;
+/** Update your own profile fields (only the keys you pass). */
+export const updateProfile = (
+  as: string,
+  patch: { name?: string; handle?: string; avatar?: string; bio?: string; followPrice?: string },
+) => jpost("/profile", { as, ...patch }, "save profile").then((j) => j.user as PublicUser);
+/** Upload a profile picture (replaces the symbol). */
+export async function uploadProfilePic(as: string, file: File): Promise<PublicUser> {
+  const fd = new FormData(); fd.append("as", as); fd.append("image", file);
+  const r = await fetch(`${SERVER_URL}/profile/pic`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(`upload picture: HTTP ${r.status}`);
+  return (await r.json()).user as PublicUser;
+}
+export const unfollowCreator = (follower: string, creator: string) =>
+  jpost("/unfollow", { follower, creator }, "unfollow").then((j) => j.followerCount as number);
+
+const ERC20_TRANSFER_ABI = [
+  { type: "function", name: "transfer", stateMutability: "nonpayable", inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }] },
+] as const;
+
+/** Super-follow a creator: pay their follow price in pathUSD ON-CHAIN (straight
+ *  from the follower's wallet to the creator's), then record the bond. A price of
+ *  0 is a free follow (no transaction). ⚠️ TESTNET ONLY. */
+export async function followCreator(
+  me: DemoUser,
+  creator: { id: string; address: `0x${string}`; followPrice?: string },
+): Promise<{ txHash?: string; amountUsd: string }> {
+  const price = Math.max(0, Number(creator.followPrice ?? "0"));
+  let txHash: string | undefined;
+  if (price > 0) {
+    if (!me.key) throw new Error("your wallet key isn't available to pay");
+    const account = privateKeyToAccount(me.key);
+    const wallet = createWalletClient({ account, chain: tempoTestnet as any, transport: http(`${SERVER_URL}/rpc`) });
+    try {
+      txHash = await wallet.writeContract({
+        address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer",
+        args: [creator.address, parseUnits(String(price), TOKEN_DECIMALS)], chain: tempoTestnet as any,
+      });
+    } catch (e: any) {
+      throw new Error(`super-follow payment failed: ${e?.shortMessage ?? e?.message ?? e}`);
+    }
+  }
+  await jpost("/follow", { follower: me.id, creator: creator.id, txHash, amountUsd: String(price) }, "record follow");
+  return { txHash, amountUsd: String(price) };
+}
 
 /** Log in with your own Tempo wallet (testnet private key → registered + usable).
  *  Full access: watch, create + upload, launch ads, earn. The key is kept in the

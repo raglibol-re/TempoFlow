@@ -32,17 +32,32 @@ import {
   fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
-import { userInsert, type CampaignRow } from "./db.js";
+import {
+  userInsert, userUpdateProfile, type CampaignRow,
+  followInsert, followRemove, isFollowing, followersOf, followingOf,
+  followerCount, followingCount, followEarnings,
+} from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
 
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
 const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
+const IMG_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif" };
 
 /** Persist an uploaded video file → returns its on-disk filename. */
 async function saveUploadedVideo(file: File): Promise<string> {
   mkdirSync(uploadsDir, { recursive: true });
   const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
   const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  writeFileSync(join(uploadsDir, name), Buffer.from(await file.arrayBuffer()));
+  return name;
+}
+
+/** Persist an uploaded profile image → returns its on-disk filename (pfp-*). */
+async function saveUploadedImage(file: File): Promise<string> {
+  mkdirSync(uploadsDir, { recursive: true });
+  let ext = (file.name.split(".").pop() ?? "png").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!IMG_MIME[ext]) ext = "png";
+  const name = `pfp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   writeFileSync(join(uploadsDir, name), Buffer.from(await file.arrayBuffer()));
   return name;
 }
@@ -211,6 +226,96 @@ app.get("/admin/users", async (c) => {
     users.map(async (u) => ({ ...publicUser(u), balance: await pathUsdBalance(u.address) })),
   );
   return c.json({ users: rows });
+});
+
+// ── Profiles + pay-to-follow (creator-platform) ──────────────────────────────
+/** A creator/user profile: identity + bio + live on-chain balance + the
+ *  super-follow graph (supporters + who they support) + their clips. */
+app.get("/users/:id/profile", async (c) => {
+  const user = getUser(c.req.param("id"));
+  if (!user) return c.json({ error: "user not found" }, 404);
+  const viewer = c.req.query("viewer");
+  const supRows = followersOf(user.id);
+  const folRows = followingOf(user.id);
+  const supporters = supRows.map((f) => { const u = getUser(f.follower); return u ? { ...publicUser(u), amountUsd: f.amountUsd, since: f.createdAt } : null; }).filter(Boolean);
+  const following = folRows.map((f) => { const u = getUser(f.creator); return u ? { ...publicUser(u), amountUsd: f.amountUsd, since: f.createdAt } : null; }).filter(Boolean);
+  let balance = 0;
+  try { balance = await pathUsdBalance(user.address); } catch { /* RPC hiccup */ }
+  return c.json({
+    user: publicUser(user),
+    balance,
+    followerCount: followerCount(user.id),
+    followingCount: followingCount(user.id),
+    followEarnings: +followEarnings(user.id).toFixed(6),
+    supporters,
+    following,
+    clips: getClips().filter((cl) => cl.ownerId === user.id),
+    viewerFollows: viewer ? isFollowing(viewer, user.id) : false,
+  });
+});
+
+/** Update your own profile (bio / symbol / display name / handle / follow price). */
+app.post("/profile", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const id = String(b?.as ?? "");
+  if (!getUser(id)) return c.json({ error: "unknown user" }, 400);
+  const patch: any = {};
+  if (typeof b.name === "string" && b.name.trim()) patch.name = b.name.trim().slice(0, 60);
+  if (typeof b.handle === "string" && b.handle.trim()) patch.handle = b.handle.trim().replace(/^@/, "").slice(0, 40);
+  if (typeof b.avatar === "string" && b.avatar.trim()) patch.avatar = [...b.avatar.trim()][0] ?? b.avatar.trim(); // first glyph
+  if (typeof b.bio === "string") patch.bio = b.bio.slice(0, 280);
+  if (b.followPrice != null && !Number.isNaN(Number(b.followPrice))) patch.followPrice = String(Math.max(0, Number(b.followPrice)));
+  userUpdateProfile(id, patch);
+  reloadUsers();
+  return c.json({ user: publicUser(getUser(id)!) });
+});
+
+/** Upload a profile picture (multipart). Replaces the symbol as the avatar. */
+app.post("/profile/pic", async (c) => {
+  const body = await c.req.parseBody();
+  const id = String(body.as ?? "");
+  if (!getUser(id)) return c.json({ error: "unknown user" }, 400);
+  const file = body.image as File | undefined;
+  if (!file || typeof file === "string") return c.json({ error: "no image" }, 400);
+  const pic = await saveUploadedImage(file);
+  userUpdateProfile(id, { pic });
+  reloadUsers();
+  return c.json({ ok: true, pic, user: publicUser(getUser(id)!) });
+});
+
+/** Serve a user's uploaded profile picture (falls back to 404 → UI shows symbol). */
+app.get("/pic/:id", (c) => {
+  const user = getUser(c.req.param("id"));
+  if (!user?.pic) return c.json({ error: "no pic" }, 404);
+  const path = join(uploadsDir, user.pic);
+  if (!existsSync(path)) return c.json({ error: "missing" }, 404);
+  const ext = user.pic.split(".").pop()?.toLowerCase() ?? "png";
+  const stream = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream;
+  return new Response(stream, {
+    headers: { "Content-Type": IMG_MIME[ext] ?? "image/png", "Cache-Control": "no-cache", "Access-Control-Allow-Origin": c.req.header("origin") ?? "*" },
+  });
+});
+
+/** Record a super-follow. The on-chain pathUSD payment (follower → creator) is
+ *  made by the BROWSER (it holds the follower's key); we just verify + record the
+ *  bond here. amountUsd/txHash come from that transfer. */
+app.post("/follow", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const follower = getUser(String(b?.follower ?? ""));
+  const creator = getUser(String(b?.creator ?? ""));
+  if (!follower || !creator) return c.json({ error: "unknown follower/creator" }, 400);
+  if (follower.id === creator.id) return c.json({ error: "can't follow yourself" }, 400);
+  followInsert({ follower: follower.id, creator: creator.id, amountUsd: String(b?.amountUsd ?? creator.followPrice ?? "0"), txHash: String(b?.txHash ?? ""), createdAt: Date.now() });
+  return c.json({ ok: true, followerCount: followerCount(creator.id) });
+});
+
+/** Drop a super-follow (no refund — the payment already settled on-chain). */
+app.post("/unfollow", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const follower = String(b?.follower ?? "");
+  const creator = String(b?.creator ?? "");
+  followRemove(follower, creator);
+  return c.json({ ok: true, followerCount: followerCount(creator) });
 });
 
 // ── Creator content management (video upload) ───────────────────────────────
