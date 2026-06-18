@@ -65,6 +65,25 @@ export const publicClient = createPublicClient({
   transport: http(),
 });
 
+const ERC20_BALANCE_ABI = [
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
+] as const;
+
+/** Read an address's pathUSD balance as a human USD number (6 decimals). */
+export async function pathUsdBalance(address: Address): Promise<number> {
+  try {
+    const raw = (await publicClient.readContract({
+      address: FLOW_CURRENCY,
+      abi: ERC20_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [address],
+    })) as bigint;
+    return Number(raw) / 1e6;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Fund a wallet with testnet tokens (pathUSD + fee token).
  *
