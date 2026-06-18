@@ -12,7 +12,9 @@ import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance, fetchAdminUsers,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, watchClip,
   videoSrc, connectTempoAccount, createCampaign,
+  fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   type DemoUser, type AdminUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
+  type Profile as ProfileData, type PublicUser,
 } from "./flow";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
@@ -101,7 +103,7 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
 }
 
 // ───────────────────────── video card / grid ─────────────────────────
-function VideoCard({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
+function VideoCard({ clip, owner, onOpen, onProfile }: { clip: Clip; owner?: PublicUser; onOpen: () => void; onProfile?: (id: string) => void }) {
   return (
     <div className="vcard" onClick={onOpen}>
       <div className="vthumb">
@@ -113,10 +115,17 @@ function VideoCard({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
         {clip.tags.includes("live") && <span className="badge live">● LIVE</span>}
       </div>
       <div className="vmeta">
-        <div className="a">{clip.thumb ?? "🎬"}</div>
+        {owner
+          ? <Avatar user={owner} size={32} onClick={onProfile ? () => onProfile(owner.id) : undefined} />
+          : <div className="a">{clip.thumb ?? "🎬"}</div>}
         <div>
           <div className="vtitle">{clip.title}</div>
-          <div className="vchan">@{clip.creator}{clip.recipients.length > 1 ? " · collab" : ""}</div>
+          <div className="vchan">
+            {owner && onProfile
+              ? <span className="chan-link" onClick={(e) => { e.stopPropagation(); onProfile(owner.id); }}>@{clip.creator}</span>
+              : <>@{clip.creator}</>}
+            {clip.recipients.length > 1 ? " · collab" : ""}
+          </div>
         </div>
       </div>
     </div>
@@ -125,7 +134,7 @@ function VideoCard({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
 
 // ───────────────────────── watch view (payment panel) ─────────────────────────
 const LOW_CAP = 0.012;
-function WatchView({ clip, me, onBack, onError, onSettled }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void }) {
+function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing">("idle");
   const [spent, setSpent] = useState(0);
   const [secs, setSecs] = useState(0);
@@ -176,7 +185,7 @@ function WatchView({ clip, me, onBack, onError, onSettled }: { clip: Clip; me: D
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
             <div className="a">{clip.thumb ?? "🎬"}</div>
-            <div><b>@{clip.creator}</b><div className="muted" style={{ fontSize: 12.5 }}>{clip.tags.map((t) => "#" + t).join(" ")}</div></div>
+            <div><b className={onProfile ? "chan-link" : undefined} onClick={() => onProfile?.(clip.ownerId)}>@{clip.creator}</b><div className="muted" style={{ fontSize: 12.5 }}>{clip.tags.map((t) => "#" + t).join(" ")}</div></div>
           </div>
           {collab && <div className="receipt" style={{ marginTop: 12 }}>Revenue split: {clip.recipients.map((r, i) => <span key={i}>{i ? " · " : ""}<b>{r.label}</b> {r.percentage}%</span>)}</div>}
         </div>
@@ -224,7 +233,7 @@ function WatchView({ clip, me, onBack, onError, onSettled }: { clip: Clip; me: D
 /** Watch a red-framed ad video and get PAID per second of proven attention.
  *  The money is pulled automatically from the advertiser's wallet (server-spawned
  *  payer); when the ad's funded budget runs out it simply stops paying. */
-function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () => void }) {
+function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; onBack: () => void; onProfile?: (id: string) => void }) {
   const [attention, setAttention] = useState(true);
   const [earned, setEarned] = useState(0);
   const [paying, setPaying] = useState(false);
@@ -293,7 +302,7 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
           <div className="w-title">{ad.title ?? ad.advertiser}</div>
           <div className="w-chan">
             <div className="a">{ad.thumb ?? "📣"}</div>
-            <div><b>{ad.advertiser}</b><div className="muted" style={{ fontSize: 12.5 }}>sponsored · pays you to watch · {ad.tags.map((t) => "#" + t).join(" ")}</div></div>
+            <div><b className={onProfile ? "chan-link" : undefined} onClick={() => onProfile?.(ad.ownerId)}>{ad.advertiser}</b><div className="muted" style={{ fontSize: 12.5 }}>sponsored · pays you to watch · {ad.tags.map((t) => "#" + t).join(" ")}</div></div>
           </div>
         </div>
 
@@ -330,6 +339,187 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
   );
 }
 
+// ───────────────────────── avatar (pic or symbol) ─────────────────────────
+function Avatar({ user, size = 40, ring, onClick }: { user: { id: string; avatar: string; pic?: string }; size?: number; ring?: boolean; onClick?: () => void }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div
+      className={"av" + (onClick ? " av-link" : "") + (ring ? " av-ring" : "")}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}
+      title={onClick ? "view profile" : undefined}
+      onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+    >
+      {user.pic && !broken
+        ? <img src={picSrc(user.id)} alt="" onError={() => setBroken(true)} />
+        : <span>{user.avatar}</span>}
+    </div>
+  );
+}
+
+const EMOJI_PRESETS = ["🌌","🎹","🍜","🎮","🐧","🦊","🎬","🎨","🚀","🔥","💎","🌊","🎧","📸","⚡","🐉","🌸","🛹","🤖","👾","🎤","🏆","🪐","🍿"];
+
+/** Deterministic banner gradient from a user id (so each profile has its own). */
+function bannerFor(id: string): string {
+  let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const a = h % 360, b = (a + 48) % 360;
+  return `linear-gradient(120deg, hsl(${a} 58% 20%), hsl(${b} 60% 32%))`;
+}
+
+// ───────────────────────── edit profile modal ─────────────────────────
+function EditProfile({ me, onClose, onSaved, onError }: { me: DemoUser; onClose: () => void; onSaved: (u: DemoUser) => void; onError: (e: string) => void }) {
+  const [name, setName] = useState(me.name);
+  const [handle, setHandle] = useState(me.handle);
+  const [bio, setBio] = useState(me.bio ?? "");
+  const [avatar, setAvatar] = useState(me.avatar);
+  const [price, setPrice] = useState(me.followPrice ?? "0.05");
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function pickFile(f: File | null) { setFile(f); setPreview(f ? URL.createObjectURL(f) : null); }
+  async function save() {
+    setBusy(true);
+    try {
+      let u = await updateProfile(me.id, { name: name.trim() || me.name, handle: handle.trim() || me.handle, bio, avatar, followPrice: price });
+      if (file) u = await uploadProfilePic(me.id, file);
+      onSaved({ ...me, ...u });
+      onClose();
+    } catch (e: any) { onError(e?.message ?? String(e)); }
+    setBusy(false);
+  }
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Edit profile</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
+        <div className="edit-pic">
+          <div className="av av-ring" style={{ width: 76, height: 76, fontSize: 38 }}>
+            {(preview || me.pic) ? <img src={preview ?? picSrc(me.id)} alt="" /> : <span>{avatar}</span>}
+          </div>
+          <label className="btn btn-ghost btn-sm" style={{ cursor: "pointer" }}>
+            📷 Upload photo<input type="file" accept="image/*" hidden onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+          </label>
+          {(preview || me.pic) && <button className="btn btn-ghost btn-sm" onClick={() => pickFile(null)}>use symbol instead</button>}
+        </div>
+        {!preview && (
+          <div className="emoji-picker">
+            {EMOJI_PRESETS.map((em) => (
+              <button key={em} className={"emoji-opt" + (avatar === em ? " sel" : "")} onClick={() => setAvatar(em)}>{em}</button>
+            ))}
+          </div>
+        )}
+        <label className="fld">Display name<input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="fld">Handle<input className="input" value={handle} onChange={(e) => setHandle(e.target.value)} /></label>
+        <label className="fld">Bio<textarea className="input" rows={3} maxLength={280} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell people what you create…" /></label>
+        <label className="fld">Super-follow price (pathUSD) — what supporters pay to follow you<input className="input" type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn" style={{ flex: 1 }} onClick={save} disabled={busy}>{busy ? "saving…" : "Save profile"}</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── profile page ─────────────────────────
+function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpdate, onBalance, onLogout }: {
+  id: string; me: DemoUser; onBack: () => void; onOpenProfile: (id: string) => void; onWatch: (c: Clip) => void;
+  onError: (e: string) => void; onMeUpdate: (u: DemoUser) => void; onBalance: () => void; onLogout: () => void;
+}) {
+  const [p, setP] = useState<ProfileData | null>(null);
+  const [tab, setTab] = useState<"videos" | "supporters" | "following">("videos");
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  async function load() { try { setP(await fetchProfile(id, me.id)); } catch (e: any) { onError(e?.message ?? String(e)); } }
+  useEffect(() => { setP(null); setTab("videos"); setToast(null); load(); /* eslint-disable-next-line */ }, [id]);
+
+  const isMe = id === me.id;
+  async function follow() {
+    if (!p) return; setBusy(true); setToast(null);
+    try {
+      const r = await followCreator(me, { id: p.user.id, address: p.user.address, followPrice: p.user.followPrice });
+      setToast(Number(r.amountUsd) > 0 ? `★ You're now supporting ${p.user.name} — paid ${usd(Number(r.amountUsd))} on Tempo${r.txHash ? ` · tx ${shortHash(r.txHash)}` : ""}` : `Now following ${p.user.name}`);
+      await load(); onBalance();
+    } catch (e: any) { onError(e?.message ?? String(e)); }
+    setBusy(false);
+  }
+  async function unfollow() {
+    if (!p) return; setBusy(true);
+    try { await unfollowCreator(me.id, p.user.id); setToast(null); await load(); } catch (e: any) { onError(e?.message ?? String(e)); }
+    setBusy(false);
+  }
+
+  if (!p) return (
+    <div className="page"><div className="backbar"><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button></div><div className="muted">loading profile…</div></div>
+  );
+  const u = p.user;
+  const price = Number(u.followPrice ?? "0");
+  const list = tab === "supporters" ? p.supporters : tab === "following" ? p.following : [];
+
+  return (
+    <div className="page profile-page">
+      <div className="backbar"><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button><span className="muted">profile</span></div>
+      <div className="pbanner" style={{ background: bannerFor(u.id) }} />
+      <div className="phead">
+        <Avatar user={u} size={104} ring />
+        <div className="phead-main">
+          <div className="pname">{u.name}<span className="role-chip2">{u.role}</span></div>
+          <div className="muted phandle">@{u.handle} · <span className="tx" title="copy address" onClick={() => copy(u.address)}>{u.address.slice(0, 8)}…{u.address.slice(-4)}</span></div>
+          {u.bio && <div className="pbio">{u.bio}</div>}
+          <div className="pstats">
+            <button className={"pstat" + (tab === "supporters" ? " on" : "")} onClick={() => setTab("supporters")}><b>{compact.format(p.followerCount)}</b> supporters</button>
+            <button className={"pstat" + (tab === "following" ? " on" : "")} onClick={() => setTab("following")}><b>{compact.format(p.followingCount)}</b> following</button>
+            <span className="pstat"><b style={{ color: "var(--in)" }}>{usd(p.followEarnings)}</b> from fans</span>
+            <span className="pill"><span className="coin">◎</span> {fmtBal(p.balance)}</span>
+          </div>
+        </div>
+        <div className="phead-cta">
+          {isMe ? (<>
+            <button className="btn" onClick={() => setEditing(true)}>✎ Edit profile</button>
+            <button className="btn btn-ghost btn-sm" onClick={onLogout}>Log out</button>
+          </>) : p.viewerFollows ? (
+            <button className="btn btn-ghost supporting" onClick={unfollow} disabled={busy} title="click to unfollow">{busy ? "…" : "✓ Supporting"}</button>
+          ) : (
+            <button className="btn btn-follow" onClick={follow} disabled={busy}>{busy ? "paying…" : price > 0 ? `★ Super-follow · ${usd(price)}` : "＋ Follow"}</button>
+          )}
+        </div>
+      </div>
+
+      {toast && <div className="receipt" style={{ marginTop: 14 }}>{toast}</div>}
+
+      <div className="ptabs">
+        {(["videos", "supporters", "following"] as const).map((t) => (
+          <button key={t} className={"ptab" + (tab === t ? " on" : "")} onClick={() => setTab(t)}>
+            {t === "videos" ? `Videos (${p.clips.length})` : t === "supporters" ? `Supporters (${p.followerCount})` : `Following (${p.followingCount})`}
+          </button>
+        ))}
+      </div>
+
+      {tab === "videos" ? (
+        p.clips.length
+          ? <div className="grid">{p.clips.map((c) => <VideoCard key={c.id} clip={c} onOpen={() => onWatch(c)} />)}</div>
+          : <div className="muted">{isMe ? "You haven't posted any videos yet." : "No videos yet."}</div>
+      ) : (
+        list.length
+          ? <div className="people">{list.map((s) => (
+              <div key={s.id} className="person" onClick={() => onOpenProfile(s.id)}>
+                <Avatar user={s} size={44} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="pname2">{s.name}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>@{s.handle}</div>
+                </div>
+                {Number(s.amountUsd) > 0 && <span className="supporter-badge">★ {usd(Number(s.amountUsd))}</span>}
+              </div>
+            ))}</div>
+          : <div className="muted">{tab === "supporters" ? "No supporters yet — be the first to super-follow." : "Not following anyone yet."}</div>
+      )}
+
+      {editing && <EditProfile me={me} onClose={() => setEditing(false)} onSaved={(uu) => { onMeUpdate(uu); load(); }} onError={onError} />}
+    </div>
+  );
+}
+
 // ───────────────────────── app ─────────────────────────
 function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
@@ -349,6 +539,7 @@ function App() {
   // ad studio (advertiser upload)
   const [adTitle, setAdTitle] = useState(""); const [adTags, setAdTags] = useState(""); const [adFile, setAdFile] = useState<File | null>(null); const [adBudget, setAdBudget] = useState("0.20"); const [publishingAd, setPublishingAd] = useState(false); const [fundingAd, setFundingAd] = useState<string | null>(null);
   const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUsers().then(setUsers).catch((e) => setError(e.message));
@@ -370,7 +561,9 @@ function App() {
   }, [me]);
 
   function login(u: DemoUser) { localStorage.setItem("tempoflow-me", JSON.stringify(u)); setMe(u); setError(null); }
-  function logout() { localStorage.removeItem("tempoflow-me"); setMe(null); setAdCampaign(null); setView("home"); }
+  function logout() { localStorage.removeItem("tempoflow-me"); setMe(null); setAdCampaign(null); setProfileId(null); setView("home"); }
+  function openProfile(id: string) { setProfileId(id); setCurrent(null); setAdCampaign(null); setError(null); setView("profile"); }
+  function onMeUpdate(u: Partial<DemoUser>) { setMe((m) => { if (!m) return m; const merged = { ...m, ...u }; localStorage.setItem("tempoflow-me", JSON.stringify(merged)); return merged; }); }
   async function submitAd() {
     if (!me || !adTitle.trim()) return; setPublishingAd(true);
     try { await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, Number(adBudget) || 0); setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setCampaigns(await fetchCampaigns()); }
@@ -403,6 +596,7 @@ function App() {
     ["admin", "Users"],
   ];
   const go = (v: string) => { setView(v); setCurrent(null); };
+  const userById = (uid: string) => users.find((u) => u.id === uid);
 
   return (
     <>
@@ -413,21 +607,23 @@ function App() {
           <span className="pill"><span className="coin">◎</span> {balance != null ? fmtBal(balance) : "…"}</span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <button className="btn btn-faucet btn-sm" onClick={getFunds} disabled={funding}>{funding ? "funding…" : "🚰 Test funds"}</button>
-          <div className="avatar" title={`${me.name} · ${me.role} — click to log out`} onClick={logout}>{me.avatar}</div>
+          <Avatar user={me} size={34} onClick={() => openProfile(me.id)} />
         </div>
       </div>
 
       {error && <div className="page" style={{ paddingBottom: 0 }}><div className="toast-err">⚠ {error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}
 
-      {view === "watch" && current
-        ? <WatchView key={current.id} clip={current} me={me} onBack={() => go("home")} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
+      {view === "profile" && profileId
+        ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
+        : view === "watch" && current
+        ? <WatchView key={current.id} clip={current} me={me} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
         : view === "earn" && activeAd
-        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} onBack={() => setAdCampaign(null)} />
+        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} onBack={() => setAdCampaign(null)} onProfile={openProfile} />
         : (
           <div className="page">
             {view === "home" && (<>
               <div className="section-title">Browse — pay only while you watch</div>
-              {feed.length ? <div className="grid">{feed.map((c) => <VideoCard key={c.id} clip={c} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">loading feed…</div>}
+              {feed.length ? <div className="grid">{feed.map((c) => <VideoCard key={c.id} clip={c} owner={userById(c.ownerId)} onProfile={openProfile} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">loading feed…</div>}
             </>)}
 
             {view === "studio" && (<>
@@ -442,8 +638,8 @@ function App() {
                   <div className="muted" style={{ fontSize: 12 }}>Stored locally (SQLite + file). Viewers pay you {usd(0.002)}/sec to your wallet.</div>
                 </div>
               </div>
-              <div className="section-title">Your channel ({myClips.length})</div>
-              {myClips.length ? <div className="grid">{myClips.map((c) => <VideoCard key={c.id} clip={c} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">No clips yet — upload one above.</div>}
+              <div className="section-title">Your channel ({myClips.length}) · <span className="chan-link" onClick={() => openProfile(me.id)}>view your profile →</span></div>
+              {myClips.length ? <div className="grid">{myClips.map((c) => <VideoCard key={c.id} clip={c} owner={me} onProfile={openProfile} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">No clips yet — upload one above.</div>}
             </>)}
 
             {view === "earn" && (<>
@@ -530,7 +726,10 @@ function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {admins.map((u) => (
                   <div key={u.id} className="urow">
-                    <div><b>{u.avatar} {u.name}</b> <span className="role-chip">· {u.role}</span><div className="muted" style={{ fontSize: 11 }}>@{u.handle} · {u.address.slice(0, 10)}…</div></div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <Avatar user={u} size={36} onClick={() => openProfile(u.id)} />
+                      <div style={{ minWidth: 0 }}><b className="chan-link" onClick={() => openProfile(u.id)}>{u.name}</b> <span className="role-chip">· {u.role}</span><div className="muted" style={{ fontSize: 11 }}>@{u.handle} · {u.address.slice(0, 10)}…</div></div>
+                    </div>
                     <div style={{ textAlign: "right" }}><div style={{ fontWeight: 800 }}>{fmtBal(u.balance)}</div>
                       <button className="btn btn-faucet btn-sm" onClick={async () => { try { await fundUser(u.id); await refreshAdmin(); } catch (e: any) { setError(e?.message); } }}>+ add funds</button></div>
                   </div>
