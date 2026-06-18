@@ -208,7 +208,6 @@ function App() {
     }).catch((e) => setError(e.message));
     fetchFeed().then(setFeed).catch((e) => setError(e.message));
     fetchCampaigns().then(setCampaigns).catch(() => {});
-    diagnose("app-load").catch(() => {});
   }, []);
 
   useEffect(() => {

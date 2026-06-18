@@ -254,3 +254,17 @@ all users with live on-chain pathUSD balances + per-user "add funds". Verified w
 directional: red → creator / green ← advertiser), intensity tied to live payment activity.
 
 All 4 workspaces typecheck; server boots with SQLite; endpoints + upload/serve verified.
+
+## 2026-06-18 — Root-caused browser "Failed to fetch" → RPC rate-limit (DEV-L)
+
+A browser self-diagnostic (web probes server+RPC, reports to `/debug`) revealed the truth:
+the browser reached the server (200) AND the RPC (chainId), but `manager.sse()` still threw
+"Failed to fetch". One probe caught the cause — **RPC `429` (rate-limited)**. The public
+Tempo RPC throttles the burst of channel-open calls; a `429` returns **without CORS headers**,
+so the browser reports it as "Failed to fetch" (Node never hit this — no CORS enforcement +
+viem retries 429). Session-long testing + retries had rate-limited our IP.
+
+**Fix:** added a server **RPC proxy** `POST /rpc` (forwards to the public RPC, retries 429/503
+with backoff, same-origin + CORS-clean). The browser's viem client now uses `${SERVER}/rpc`
+instead of the public RPC directly. Verified end-to-end: full channel open through the proxy
+settles on-chain (`tx 0x97b8…`). Removed the on-app-load direct-RPC probe (it added load).

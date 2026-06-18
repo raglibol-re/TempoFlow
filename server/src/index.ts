@@ -19,7 +19,7 @@ import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
-import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, PRICES, fundWallet, pathUsdBalance } from "@flow/shared";
+import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, fundWallet, pathUsdBalance } from "@flow/shared";
 import { mppx, operatorAddress } from "./config.js";
 import { initUsers, users, getUser, publicUser } from "./users.js";
 import {
@@ -97,6 +97,31 @@ app.post("/debug", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   console.log("[browser-debug]", JSON.stringify(b));
   return c.json({ ok: true });
+});
+
+/**
+ * JSON-RPC proxy. The browser routes ALL chain calls through here instead of
+ * hitting the public Tempo RPC directly — this avoids browser CORS fragility and,
+ * crucially, retries the public RPC's 429 rate-limits server-side (a throttled
+ * 429 reaches the browser without CORS headers → "Failed to fetch"). (DEV-L)
+ */
+app.post("/rpc", async (c) => {
+  const origin = c.req.header("origin");
+  const body = await c.req.text();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const r = await fetch(TEMPO_RPC_URL, { method: "POST", headers: { "content-type": "application/json" }, body });
+      if (r.status === 429 || r.status === 503) {
+        await sleep(200 * (attempt + 1) + Math.floor(Math.random() * 150));
+        continue;
+      }
+      const text = await r.text();
+      return corsify(origin, new Response(text, { status: r.status, headers: { "content-type": "application/json" } }));
+    } catch {
+      await sleep(200 * (attempt + 1));
+    }
+  }
+  return corsify(origin, new Response(JSON.stringify({ jsonrpc: "2.0", error: { code: -32005, message: "rpc proxy: rate-limited, try again" } }), { status: 200, headers: { "content-type": "application/json" } }));
 });
 
 // ── Test funds (faucet) + admin add-funds ───────────────────────────────────

@@ -48,6 +48,29 @@ export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;
 
+/** Trace every fetch (RPC + server) so we can see exactly which request fails
+ *  during channel open. Reports each RPC/watch call + any throw to /debug. */
+let traced = false;
+export function enableFetchTracing() {
+  if (traced || typeof window === "undefined") return;
+  traced = true;
+  const orig = window.fetch.bind(window);
+  const report = (o: any) => orig(`${SERVER_URL}/debug`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ context: "fetch-trace", ...o }) }).catch(() => {});
+  window.fetch = async (input: any, init?: any) => {
+    const url = typeof input === "string" ? input : (input?.url ?? String(input));
+    const method = init?.method ?? (input?.method) ?? "GET";
+    const interesting = url.includes("moderato.tempo") || url.includes("/watch/") || url.includes("/attention/");
+    try {
+      const r = await orig(input, init);
+      if (interesting) report({ url, method, status: r.status });
+      return r;
+    } catch (e: any) {
+      report({ url, method, error: String(e?.name) + ": " + String(e?.message ?? e) });
+      throw e;
+    }
+  };
+}
+
 /** Browser-side reachability self-test → reported to the server log (/debug). */
 export async function diagnose(context: string, extra: Record<string, unknown> = {}) {
   const probe = async (label: string, fn: () => Promise<any>) => {
@@ -86,9 +109,11 @@ export interface Tick { second: number; spentUsd: number; creator: string; clipI
 export interface CloseSummary { spentUsd?: number; refundUsd?: number; txHash?: string }
 export interface WatchHandle { stop: () => Promise<CloseSummary | undefined> }
 
+// Route browser chain calls through our server's RPC proxy (CORS-clean + 429 retry).
+const RPC_PROXY = `${SERVER_URL}/rpc`;
 function manager(user: DemoUser, maxDeposit = "0.5") {
   const account = privateKeyToAccount(user.key);
-  const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+  const client = createPublicClient({ chain: tempoTestnet as any, transport: http(RPC_PROXY) });
   return sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit, escrow: ESCROW_CONTRACT });
 }
 const rawToUsd = (raw?: string) => (raw == null ? undefined : Number(raw) / 10 ** TOKEN_DECIMALS);
