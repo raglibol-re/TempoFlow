@@ -18,6 +18,8 @@ import {
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
 const fmtBal = (n: number) => "$" + compact.format(n);
 const usd = (n: number) => "$" + n.toFixed(3);
+const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
+const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
 
 // ───────────────────────── money-flow canvas ─────────────────────────
 function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
@@ -205,10 +207,20 @@ function WatchView({ clip, me, onBack, onError, onSettled }: { clip: Clip; me: D
             <button className="btn btn-ghost" onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Stop</button>
           </div>
           <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Demo: limited funds (stops after ~6s)</label>
-          {summary && (
-            <div className="receipt">✓ settled on Tempo · paid <b>{usd(summary.spentUsd ?? 0)}</b> · refunded <b>{usd(summary.refundUsd ?? 0)}</b>
-              {summary.txHash && <div className="tx">tx {summary.txHash}</div>}</div>
-          )}
+          {summary && (() => {
+            const paid = summary.spentUsd ?? spent;
+            const refunded = Math.max(0, deposit - paid);
+            return (
+              <div className="receipt">
+                <div className="receipt-head">✓ Settled on Tempo</div>
+                <div className="statline"><span className="k">paid to creator</span><span><b>{usd(paid)}</b>{summary.seconds != null ? ` · ${summary.seconds}s` : ""}</span></div>
+                <div className="statline"><span className="k">deposit refunded</span><span style={{ color: "var(--in)" }}>{usd(refunded)}</span></div>
+                {summary.txHash
+                  ? <div className="tx" title="click to copy full tx hash" onClick={() => copy(summary.txHash!)}>tx {shortHash(summary.txHash)} <span className="copy">⧉ copy</span></div>
+                  : <div className="tx">settlement recorded on Tempo</div>}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -224,6 +236,7 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
   const [earned, setEarned] = useState(0);
   const [paying, setPaying] = useState(false);
   const [started, setStarted] = useState(false); // payment channel open + actually paying
+  const [events, setEvents] = useState<NetSnapshot["events"]>([]);
   const baseline = useRef<number | null>(null);
   const prev = useRef(0);
   const video = useRef<HTMLVideoElement | null>(null);
@@ -246,6 +259,7 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
         const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6);
         setPaying(e > prev.current); prev.current = e; setEarned(e);
         if (e > 0) setStarted(true);
+        setEvents(n.events.filter((ev) => ev.direction === "in").slice(0, 6));
       } catch { /* keep last */ }
     }, 1500);
     return () => clearInterval(id);
@@ -301,6 +315,17 @@ function AdWatch({ ad, me, onBack }: { ad: Campaign; me: DemoUser; onBack: () =>
           </div>
           <MoneyFlow dir="in" active={attention && paying} />
           <div className="receipt" style={{ background: "#0f141f", borderColor: "#22304a" }}>💸 Money comes straight from <b>{ad.advertiser}</b>’s wallet — automatically, per second you watch.</div>
+          {events.length > 0 && (
+            <div className="feed-events">
+              <div className="role-chip">your live receipts · settled on Tempo</div>
+              {events.map((e) => (
+                <div key={e.id} style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--in)" }}>▲ from {e.counterparty}</span>
+                  <span className="muted">{usd(Number(e.amount))}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="row">
             <button className={attention ? "btn btn-ghost" : "btn"} style={{ flex: 1 }} onClick={() => setAttention((a) => !a)}>{attention ? "Look away 🙈" : "Look back 👀"}</button>
             <button className="btn btn-ghost" onClick={onBack}>Stop</button>

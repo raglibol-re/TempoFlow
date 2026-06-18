@@ -151,7 +151,9 @@ export async function uploadClip(as: string, title: string, tags: string[], file
 }
 
 export interface Tick { second: number; spentUsd: number; creator: string; clipId: string }
-export interface CloseSummary { spentUsd?: number; refundUsd?: number; txHash?: string }
+/** Result of settling (closing) a payment channel — straight from the on-chain
+ *  receipt. `refundUsd` is computed by the caller against the deposit it showed. */
+export interface CloseSummary { spentUsd?: number; seconds?: number; txHash?: string; channelId?: string }
 export interface WatchHandle { stop: () => Promise<CloseSummary | undefined> }
 
 // Route browser chain calls through our server's RPC proxy (CORS-clean + 429 retry).
@@ -195,8 +197,15 @@ export async function watchClip(
       await drained;
       let receipt: any;
       try { receipt = await mgr.close(); } catch (e: any) { throw new Error(`settle/refund failed: ${e?.message ?? e}`); }
-      const spentUsd = rawToUsd(receipt?.spent);
-      return { spentUsd, txHash: receipt?.txHash, refundUsd: spentUsd != null ? +(0.5 - spentUsd).toFixed(6) : undefined };
+      // Straight from the on-chain receipt: spent (raw units), units (paid
+      // seconds), the settlement txHash, and the channel id. Refund is derived
+      // by the UI against the deposit it displayed.
+      return {
+        spentUsd: rawToUsd(receipt?.spent),
+        seconds: typeof receipt?.units === "number" ? receipt.units : undefined,
+        txHash: receipt?.txHash,
+        channelId: receipt?.channelId ?? receipt?.reference,
+      };
     },
   };
 }
