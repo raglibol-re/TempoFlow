@@ -7,7 +7,12 @@ Protocol (MPP)**.
 
 > _Your attention to ads pays for your creator feed._
 
-![money flow demo](docs/assets/flow.gif) <!-- TODO: add GIF in Phase 5 -->
+![money flow demo](docs/assets/flow.gif) <!-- TODO: capture a GIF of the running app -->
+
+**Status:** Phases 1–5 working on Tempo testnet — both money directions live over MPP
+payment channels, attention-gated ads, scrollable feed with collab splits, validated
+`/openapi.json` discovery, two autonomous budgeted agents settling on-chain, and a
+real-time money-flow UI. **TESTNET ONLY — never real funds.**
 
 ## The reversal
 
@@ -35,11 +40,19 @@ pnpm wallets:setup          # generate + fund testnet wallets, writes .env (TEST
 pnpm dev                    # ONE COMMAND → server :3000 + web :5173
 ```
 
-Open **http://localhost:5173**, hit **Watch** (money streams out to the creator per
-second), then **Skip** (settle on-chain + refund the unused deposit).
+Open **http://localhost:5173**:
+- **Watch** a clip → money streams **out** to the creator per second; **Skip** → settle
+  on-chain + refund. The collab clip shows a 70/20/10 split.
+- Run the advertiser (`pnpm --filter @flow/server spike:attention`), then toggle
+  **Look away / Look back** on the ad card → money streams **in** only while you're watching.
 
-Headless check: `pnpm --filter @flow/server spike`. Agents (Phase 4):
-`pnpm agent:curator`, `pnpm agent:advertiser`.
+**Autonomous agents** (the leave-it-running wow):
+```bash
+pnpm agent:advertiser -- --budget 0.08    # pays viewers for proven attention
+pnpm agent:curator    -- --budget 0.05    # pays creators, earns from ads, net-aware
+```
+Headless single-watch check: `pnpm --filter @flow/server spike`.
+Validate discovery: `npx mppx discover validate http://localhost:3000/openapi.json`.
 
 ## Architecture
 
@@ -62,7 +75,15 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 - [07 Demo Script](docs/07-demo-script.md) · [08 Pitch](docs/08-pitch.md) ·
   [09 API](docs/09-api.md) · [10 Runbook](docs/10-runbook.md)
 
-## Status
+## What works (Definition of Done)
 
-Phase 0 (setup & context) complete. **TESTNET ONLY — never real funds.**
-Built for the MPP Hackathon (Tempo), 16–20 June 2026.
+- ✅ Both money directions live over MPP sessions on Tempo testnet
+- ✅ Skip / attention-loss stops payment instantly and refunds unused deposit
+- ✅ Viewer net balance rises from ads, falls from creators — live
+- ✅ Attention heartbeat gate prevents paying for ignored ads
+- ✅ Curator + Advertiser agents run autonomously with spend controls + on-chain settle
+- ✅ `/openapi.json` discovery present and valid (`mppx discover validate`)
+- ✅ Receipts / live flow feed in the UI
+- ⏭️ Remaining: Phase 6 demo hardening (seed/demo mode, reset, dress rehearsal)
+
+Built for the MPP Hackathon (Tempo), 16–20 June 2026. **TESTNET ONLY.**

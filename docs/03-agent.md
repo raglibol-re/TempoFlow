@@ -1,46 +1,58 @@
-# 03 — Agents (Phase 4)
+# 03 — Agents (Phase 4) ✅ BUILT
 
-Two headless TypeScript agents on `mppx/client`, each with a spend policy, CLI-driven.
-They demonstrate Tempo's "agentic payments" story.
+Two headless TypeScript agents on `mppx/client`, each with a spend policy and CLI flags.
+They demonstrate Tempo's "agentic payments" story. **Verified autonomous on testnet**
+(see [04-progress-log.md](04-progress-log.md)).
 
-> Status: **design** (scaffold only in Phase 0). Implementation in Phase 4.
+Code: [`agent/src/lib.ts`](../agent/src/lib.ts) (shared infra),
+[`agent/src/curator.ts`](../agent/src/curator.ts), [`agent/src/advertiser.ts`](../agent/src/advertiser.ts).
 
-## Shared requirements
+## Shared infrastructure (`lib.ts`)
 
-- **Spend controls:** `maxPerSession`, `maxPerMinute`, `totalBudget` (USD). Hard stop at
-  limit; always `session.close()` on stop. Modeled on Tempo wallet spend-controls.
-- **Structured logs:** every payment → `{ ts, direction, amount, counterparty, contentId,
-  receiptRef }` as JSONL.
-- **Config:** `agent.config.ts` / JSON; CLI flags override.
+- **`SpendPolicy`** — `totalBudget` + `maxPerMinute` caps. `allows(amount)` checks both the
+  total and a rolling 60s window before every charge; `record(amount)` tracks spend.
+- **Structured logs** — JSONL to `agent/logs/<name>.jsonl` + console. Every payment logs
+  `{direction, amount, counterparty, contentId}`; plus `info` and a final `summary`.
+- **`discoverOffers()`** — fetches `/openapi.json` and parses `x-payment-info.offers` into
+  `{path, amount, currency, recipient, intent}` so agents find endpoints + terms themselves.
+- **`makeManager(key)`** — viem account + `sessionManager` (decimals 6, escrow precompile).
+- **`runPaidStream({manager,url,stopUrl,onFrame,shouldStop})`** — opens the paid SSE
+  session, drives it frame-by-frame, and on `shouldStop` does a graceful stop + cooperative
+  close (settle + refund). One reusable driver for both directions.
 
-## 3.1 Curator agent — pays creators, earns from ads
+## 4.1 Curator agent — pays creators, earns from ads
 
-Budget + topic preferences. Loop:
-1. Fetch the feed via discovery (`/openapi.json`).
-2. Pick creator content by preference; "watch" it (open session, pay/sec, actually
-   consume/summarize — consumption *is* the attention proof).
-3. "Watch" ads to earn (process ad content → real heartbeat/proof; no fake watchtime).
-4. Respect **net** budget; stop cleanly at limit.
+Uses the **viewer** wallet. `pnpm agent:curator -- --budget 0.05 --watch 6 --tags nature,music`
 
-**Wow demo build:** start Thursday, show Saturday — _"this agent has run autonomously for
-48h, paid X to creators, earned Y from ads, net Z."_
+1. Discovers offers via `/openapi.json`; pulls inventory from `/feed` + `/campaigns`.
+2. Ranks clips by tag preference; watches each (a **fresh channel per clip**) for `--watch`
+   seconds, paying `$0.002/sec`, then closes (settle + refund).
+3. Concurrently sends attention heartbeats so advertisers pay it (money IN).
+4. Stops at `--budget` (creator spend cap) or Ctrl-C; prints a net summary.
 
-## 3.2 Advertiser agent — pays viewers for attention
+> **Wow:** run it for hours — `agent/logs/curator.jsonl` is the "leave-it-running" proof of
+> autonomous payments + earnings. Observed run: paid $0.03 to 4 clips, earned $0.06, net +$0.03.
 
-Campaign budget + targeting policy. Loop:
-1. Find active viewer/attention sessions via discovery.
-2. Decide whose attention is worth paying for.
-3. Stream payment/sec to the attention endpoint **while heartbeats are valid**.
-4. Stop at budget end / when attention drops.
+## 4.2 Advertiser agent — pays viewers for proven attention
 
-## Config reference (draft)
+Uses the **advertiser** wallet. `pnpm agent:advertiser -- --budget 0.08 --tags fintech`
 
-```ts
-export interface AgentConfig {
-  role: "curator" | "advertiser";
-  privateKey: `0x${string}`;       // testnet
-  serverUrl: string;
-  preferences?: { tags: string[] };
-  spend: { maxPerSessionUsd: string; maxPerMinuteUsd: string; totalBudgetUsd: string };
-}
-```
+1. Discovers attention endpoints (recipient = viewer) via `/openapi.json`.
+2. Picks a campaign (tag targeting), opens a session, pays `$0.004/sec` **only while the
+   viewer's attention is fresh** (server gate) — `paused` frames cost nothing.
+3. Stops at `--budget` or after `--idleStop` ms with no attention; closes (settle + refund).
+
+> Observed run: paid the viewer $0.06 (15s of proven attention), stopped at budget, on-chain txHash.
+
+## CLI / config reference
+
+| Flag | Curator | Advertiser | Default |
+|---|---|---|---|
+| `--budget` | total USD paid to creators | total USD paid to viewers | 0.05 / 0.08 |
+| `--maxPerMinute` | per-minute spend cap | per-minute spend cap | 0.05 / 0.1 |
+| `--watch` | seconds watched per clip | — | 6 |
+| `--tags` | preferred clip tags | targeting tags | (none) |
+| `--idleStop` | — | ms of no-attention before stopping | 15000 |
+| `--server` (env `SERVER_URL`) | FLOW server base URL | same | http://localhost:3000 |
+
+Spend controls, structured logs, and headless CLI operation satisfy the §5 agent requirements.

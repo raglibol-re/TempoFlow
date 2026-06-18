@@ -34,7 +34,8 @@ const MAX_PER_MIN = Number(f.maxPerMinute ?? "0.05");
 const log = makeLogger("curator");
 
 async function main() {
-  const { account, manager } = makeManager(requireKey("VIEWER_PRIVATE_KEY"));
+  const key = requireKey("VIEWER_PRIVATE_KEY");
+  const { account } = makeManager(key); // for address/logging
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
   log.info(`curator ${account.address} starting`, { budget: BUDGET, watchSecs: WATCH_SECS, prefTags: PREF_TAGS });
 
@@ -80,6 +81,7 @@ async function main() {
     log.info(`watching "${clip.title}" @${clip.creator} for up to ${WATCH_SECS}s`);
     let clipSpent = 0;
     let secs = 0;
+    const { manager } = makeManager(key); // fresh channel per clip
     const receipt = await runPaidStream({
       manager,
       url: `${SERVER}/watch/${clip.id}`,

@@ -157,3 +157,39 @@ local→remote (awaiting user OK; not executed).
 
 **Phase 3 done.** Next: Phase 4 — autonomous Curator + Advertiser agents (the
 "leave-it-running" wow), using the discovery doc to find content.
+
+## 2026-06-18 (Phase 4 complete) — autonomous agents on testnet
+
+Built `agent/src/lib.ts` (SpendPolicy, JSONL logger, `discoverOffers`, `makeManager`,
+`runPaidStream`), `curator.ts`, `advertiser.ts`. Both headless, CLI-flagged, with spend
+controls and structured logs.
+
+**Bugs fixed during testing:** (1) a `sessionManager` can't reopen after `close()`
+("Invalid session transition: closed + challengeReceived") → curator now makes a **fresh
+manager/channel per clip**. (2) advertiser would hang when attention stopped → added an
+`--idleStop` (default 15s) so it ends the campaign cleanly.
+
+**Verified autonomous run (testnet):**
+- Curator: discovered 2 offers via `/openapi.json`, watched 4 clips (Aurora, Synthwave,
+  Bangkok collab, Aurora), paid creators $0.03 (settle+refund each), stopped at budget.
+- Advertiser: discovered the attention endpoint, paid the viewer $0.004/sec ×15 = $0.06,
+  stopped at budget, on-chain txHash `0x5bdf…`.
+- **Net: out $0.03 to creators, in $0.06 from the advertiser → net +$0.03.** The
+  self-sustaining loop ("ad attention finances the feed") runs autonomously, both agents
+  respecting budgets and closing channels cleanly. JSONL audit trails in `agent/logs/`.
+
+**Phase 4 done.** Next: Phase 5 polish (money-flow animation, receipts view) + 07/08/README.
+
+## 2026-06-18 (Phase 5) — polish + pitch docs
+
+- **Money-flow animation:** directional flow lanes (CSS particle stream) — red **→ creator**
+  on the active clip while watching, green **← advertiser** on the ad card while it's paying.
+- **Receipts / states:** "live receipts · settled on Tempo" header on the flow feed; loading
+  state for the feed; existing error surface; net poll auto-retries (reconnect-tolerant).
+- **Docs:** [03-agent.md](03-agent.md) written; [07-demo-script.md](07-demo-script.md) and
+  [08-pitch.md](08-pitch.md) finalized with the real demo flow + agent numbers; README
+  refreshed (Phases 1–5, DoD checklist). GIF capture still TODO.
+- All 4 workspaces typecheck; web + server + discovery smoke-tested OK.
+
+**Phases 1–5 complete.** Remaining: Phase 6 demo hardening (seed/demo mode, reset button,
+network fallbacks, dress rehearsal) + capture the README GIF.

@@ -25,6 +25,39 @@ import {
   type NetSnapshot,
 } from "./flow";
 
+/** Animated directional money-flow lane: dots stream out (red) or in (green). */
+const FLOW_CSS = `
+@keyframes flowRight { from { transform: translateX(-12px); opacity: 0 } 10% { opacity: 1 } 90% { opacity: 1 } to { transform: translateX(var(--lane)); opacity: 0 } }
+@keyframes flowLeft  { from { transform: translateX(var(--lane)); opacity: 0 } 10% { opacity: 1 } 90% { opacity: 1 } to { transform: translateX(-12px); opacity: 0 } }
+.flow-lane { position: relative; height: 18px; overflow: hidden; border-radius: 9px; background: #0f0f17; }
+.flow-dot { position: absolute; top: 6px; width: 6px; height: 6px; border-radius: 50%; }
+`;
+
+function FlowLane({ direction, active }: { direction: "in" | "out"; active: boolean }) {
+  const color = direction === "out" ? "#ff7a7a" : "#46d39a";
+  const anim = direction === "out" ? "flowRight" : "flowLeft";
+  const dots = 7;
+  return (
+    <div className="flow-lane" style={{ ["--lane" as any]: "320px", opacity: active ? 1 : 0.25 }}>
+      {Array.from({ length: dots }).map((_, i) => (
+        <span
+          key={i}
+          className="flow-dot"
+          style={{
+            background: color,
+            boxShadow: `0 0 6px ${color}`,
+            left: 0,
+            animation: active ? `${anim} 1.8s linear ${(i * 1.8) / dots}s infinite` : "none",
+          }}
+        />
+      ))}
+      <span style={{ position: "absolute", right: 8, top: 1, fontSize: 11, opacity: 0.7, color }}>
+        {direction === "out" ? "→ creator" : "← advertiser"}
+      </span>
+    </div>
+  );
+}
+
 function App() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -120,6 +153,7 @@ function App() {
 
   return (
     <div style={styles.page}>
+      <style>{FLOW_CSS}</style>
       <div style={styles.phone}>
         <header style={styles.header}>
           <h1 style={{ margin: 0, fontSize: 22 }}>FLOW</h1>
@@ -172,6 +206,7 @@ function App() {
                 {active && (
                   <>
                     <div style={styles.outAmount}>− ${spentUsd.toFixed(3)}</div>
+                    <FlowLane direction="out" active={phase === "watching"} />
                     {tick && <div style={{ fontSize: 12, opacity: 0.6 }}>watched {tick.second}s</div>}
                   </>
                 )}
@@ -224,6 +259,7 @@ function App() {
                 pays you ${campaign.pricePerSec}/sec for real attention
               </div>
               <div style={styles.inAmount}>+ ${net?.inUsd.toFixed(3) ?? "0.000"}</div>
+              <FlowLane direction="in" active={attention && adPaying} />
               <div style={{ fontSize: 12, opacity: 0.75 }}>
                 {attention ? (adPaying ? "👀 attention proven — advertiser paying you" : "👀 watching — waiting for advertiser…") : "🙈 looked away — payment paused"}
               </div>
@@ -237,8 +273,15 @@ function App() {
           )}
         </div>
 
+        {clips.length === 0 && !error && (
+          <div style={{ opacity: 0.6, textAlign: "center", padding: 20 }}>loading feed…</div>
+        )}
+
         {net && net.events.length > 0 && (
           <div style={styles.events}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1, opacity: 0.5, marginBottom: 2 }}>
+              live receipts · settled on Tempo
+            </div>
             {net.events.slice(0, 5).map((e) => (
               <div key={e.id} style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: e.direction === "in" ? "#46d39a" : "#ff7a7a" }}>

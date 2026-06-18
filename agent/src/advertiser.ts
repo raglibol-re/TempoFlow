@@ -56,9 +56,12 @@ async function main() {
   const pricePerSec = Number(campaign.pricePerSec);
   log.info(`running campaign "${campaign.id}" — paying viewers $${pricePerSec}/sec for proven attention`);
 
-  // 3) Stream payment to the viewer while attention is fresh; stop at budget.
+  // 3) Stream payment to the viewer while attention is fresh; stop at budget
+  //    or after a stretch of no attention (idle) — no point paying to wait.
+  const IDLE_STOP_MS = Number(f.idleStop ?? "15000");
   let paid = 0;
-  let runningLow = false;
+  let stopping = false;
+  let lastPaid = Date.now();
   const receipt = await runPaidStream({
     manager,
     url: `${SERVER}/attention/${campaign.id}`,
@@ -66,17 +69,22 @@ async function main() {
     onFrame: (fr) => {
       if (fr.type === "paid") {
         paid = fr.paidUsd;
+        lastPaid = Date.now();
         policy.record(pricePerSec);
         log.payment({ direction: "out", amount: pricePerSec, counterparty: "viewer", contentId: campaign.id });
-      } else if (fr.type === "paused" && !runningLow) {
+      } else if (fr.type === "paused") {
         log.info("attention lost — not paying (gate active)");
       }
     },
     shouldStop: () => {
+      if (stopping) return true;
       if (!policy.allows(pricePerSec)) {
-        if (!runningLow) log.info(`budget reached ($${paid.toFixed(4)}/${BUDGET}) — stopping`);
-        runningLow = true;
-        return true;
+        log.info(`budget reached ($${paid.toFixed(4)}/${BUDGET}) — stopping`);
+        return (stopping = true);
+      }
+      if (Date.now() - lastPaid > IDLE_STOP_MS) {
+        log.info(`no attention for ${IDLE_STOP_MS / 1000}s — ending campaign`);
+        return (stopping = true);
       }
       return false;
     },
