@@ -12,7 +12,6 @@
 import "./env.js"; // must be first — loads .env before config/shared
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { generate } from "mppx/discovery";
 import { parseUnits } from "viem";
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
@@ -40,22 +39,39 @@ const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov
 const app = new Hono();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-app.use(
-  "*",
-  cors({
-    origin: (o) => o ?? "*",
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Authorization", "Content-Type", "Accept"],
-    exposeHeaders: ["Payment-Receipt", "WWW-Authenticate"],
-    credentials: true,
-  }),
-);
+// MPP sends custom request headers (Accept-Payment, Payment, …) which trigger a
+// CORS preflight. Rather than enumerate them, REFLECT whatever the client asks
+// for — bulletproof against any mppx header. (DEV-M: "accept-payment not allowed")
+const EXPOSE = "Payment-Receipt, WWW-Authenticate, Accept-Payment, Payment-Required";
+app.use("*", async (c, next) => {
+  const origin = c.req.header("origin") ?? "*";
+  if (c.req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": c.req.header("access-control-request-headers") ?? "*",
+        "Access-Control-Expose-Headers": EXPOSE,
+        "Access-Control-Max-Age": "86400",
+        Vary: "Origin",
+      },
+    });
+  }
+  await next();
+  try {
+    c.res.headers.set("Access-Control-Allow-Origin", origin);
+    c.res.headers.set("Access-Control-Expose-Headers", EXPOSE);
+    c.res.headers.set("Vary", "Origin");
+  } catch {
+    /* immutable (streamed) responses are handled by corsify() */
+  }
+});
 
-/** mppx returns raw Response objects; the cors() middleware only decorates
- * Hono-native ones. Add CORS headers so the browser doesn't see "failed to fetch". */
+/** mppx returns raw Response objects (402/SSE/204) whose headers we set directly. */
 function corsify(origin: string | undefined, res: Response): Response {
   res.headers.set("Access-Control-Allow-Origin", origin ?? "*");
-  res.headers.set("Access-Control-Expose-Headers", "Payment-Receipt, WWW-Authenticate");
+  res.headers.set("Access-Control-Expose-Headers", EXPOSE);
   res.headers.set("Vary", "Origin");
   return res;
 }

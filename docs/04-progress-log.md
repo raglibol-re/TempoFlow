@@ -268,3 +268,16 @@ viem retries 429). Session-long testing + retries had rate-limited our IP.
 with backoff, same-origin + CORS-clean). The browser's viem client now uses `${SERVER}/rpc`
 instead of the public RPC directly. Verified end-to-end: full channel open through the proxy
 settles on-chain (`tx 0x97b8…`). Removed the on-app-load direct-RPC probe (it added load).
+
+## 2026-06-18 — REAL browser fix: CORS Accept-Payment header (DEV-M)
+
+The browser console finally gave the exact cause: "Request header field **accept-payment**
+is not allowed by Access-Control-Allow-Headers in preflight response." mppx's client sends a
+custom `Accept-Payment` request header on /watch + /attention, which triggers a CORS preflight;
+our fixed `allowHeaders` list didn't include it → preflight blocked → "Failed to fetch". (My
+earlier preflight test passed only because I sent `authorization`, not `accept-payment`.)
+
+**Fix:** replaced Hono `cors()` with a middleware that **reflects** `Access-Control-Request-Headers`
+in the preflight (allows ANY mppx header — no enumeration), drops `credentials:true`, and exposes
+the MPP response headers. Verified: OPTIONS now returns `ACAH: accept-payment,authorization`.
+The RPC proxy (DEV-L) stays as rate-limit insulation. Both real fixes for browser watch.
