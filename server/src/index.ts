@@ -18,7 +18,7 @@ import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
-import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, fundWallet, pathUsdBalance } from "@flow/shared";
+import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, fundWallet, pathUsdBalance, type Campaign } from "@flow/shared";
 import { mppx, operatorAddress } from "./config.js";
 import { initUsers, users, getUser, publicUser, reloadUsers } from "./users.js";
 import {
@@ -29,13 +29,37 @@ import {
   getCampaign,
   addClip,
   addCampaign,
+  fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
-import { userInsert } from "./db.js";
+import { userInsert, type CampaignRow } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
 
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
 const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
+
+/** Persist an uploaded video file → returns its on-disk filename. */
+async function saveUploadedVideo(file: File): Promise<string> {
+  mkdirSync(uploadsDir, { recursive: true });
+  const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  writeFileSync(join(uploadsDir, name), Buffer.from(await file.arrayBuffer()));
+  return name;
+}
+
+/** Remaining funded budget for an ad (committed budget − already paid out). */
+const campaignRemaining = (camp: CampaignRow) => +(Number(camp.maxBudget) - ledger.spentOn(camp.id)).toFixed(6);
+
+/** Enrich an ad with funding status for the API (spent/remaining/funded + wallet). */
+async function enrichCampaign(camp: CampaignRow): Promise<Campaign> {
+  const spentUsd = ledger.spentOn(camp.id);
+  const remainingUsd = +(Number(camp.maxBudget) - spentUsd).toFixed(6);
+  const company = getUser(camp.ownerId);
+  let advertiserBalance = 0;
+  try { if (company) advertiserBalance = await pathUsdBalance(company.address); } catch { /* RPC hiccup — show 0 */ }
+  const { videoPath, ...pub } = camp;
+  return { ...pub, spentUsd, remainingUsd, advertiserBalance, funded: remainingUsd >= Number(camp.pricePerSec) };
+}
 
 const app = new Hono();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -98,7 +122,7 @@ app.get("/users", (c) => c.json({ users: users.map(publicUser) }));
 /** TESTNET ONLY: keys for the local account switcher. */
 app.get("/demo/users", (c) => c.json({ users }));
 app.get("/feed", (c) => c.json({ clips: getClips() }));
-app.get("/campaigns", (c) => c.json({ campaigns: getCampaigns() }));
+app.get("/campaigns", async (c) => c.json({ campaigns: await Promise.all(getCampaigns().map(enrichCampaign)) }));
 app.get("/net", (c) => {
   const as = c.req.query("as");
   const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
@@ -154,16 +178,21 @@ app.post("/demo/fund", async (c) => {
     return c.json({ error: (e as Error).message }, 500);
   }
 });
-/** Register a connected Tempo account (login with your own wallet). Address only
- *  — the private key stays in the browser; the server just needs the address to
- *  set recipients + attribute ledger flows. */
+/** Register a connected Tempo account (login with your own wallet).
+ *  - viewer/creator: ADDRESS ONLY — the private key stays in the browser (they
+ *    sign their own payments); the server just needs the address.
+ *  - advertiser: the ad model REQUIRES the app to pull funds from the advertiser's
+ *    wallet automatically (server-spawned payer), so an advertiser may submit its
+ *    TESTNET key, stored server-side for that purpose. ⚠️ TESTNET ONLY. */
 app.post("/users", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const address = String(b?.address ?? "");
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return c.json({ error: "bad address" }, 400);
   const role = ["viewer", "creator", "advertiser"].includes(b?.role) ? b.role : "creator";
   const id = `me-${address.slice(2, 10).toLowerCase()}`;
-  const user = { id, name: String(b?.name ?? "My Tempo Account"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: "🪪", address: address as `0x${string}`, key: "" as `0x${string}` };
+  // Only advertisers persist a key (needed for automatic wallet-funded ad payouts).
+  const key = (role === "advertiser" && typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : "";
+  const user = { id, name: String(b?.name ?? "My Tempo Account"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: role === "advertiser" ? "📣" : "🪪", address: address as `0x${string}`, key: key as `0x${string}` };
   userInsert(user);
   reloadUsers();
   return c.json({ user: publicUser(user) });
@@ -196,10 +225,7 @@ app.post("/clips", async (c) => {
     let hasVideo = false;
     let videoPath: string | undefined;
     if (file && typeof file !== "string") {
-      mkdirSync(uploadsDir, { recursive: true });
-      const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
-      videoPath = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      writeFileSync(join(uploadsDir, videoPath), Buffer.from(await file.arrayBuffer()));
+      videoPath = await saveUploadedVideo(file);
       hasVideo = true;
     }
     const clip = addClip({
@@ -223,10 +249,12 @@ app.post("/clips", async (c) => {
   return c.json({ clip });
 });
 
-// ── Serve uploaded video (HTTP range support for <video>) ───────────────────
+// ── Serve uploaded video (HTTP range support for <video>) — clips AND ads ────
 app.get("/video/:id", (c) => {
-  const clip = getClip(c.req.param("id")) as any;
-  if (!clip?.videoPath) return c.json({ error: "no video for this clip" }, 404);
+  const id = c.req.param("id");
+  const item = (getClip(id) ?? getCampaign(id)) as any;
+  if (!item?.videoPath) return c.json({ error: "no video for this id" }, 404);
+  const clip = item;
   const path = join(uploadsDir, clip.videoPath);
   if (!existsSync(path)) return c.json({ error: "file missing" }, 404);
   const total = statSync(path).size;
@@ -255,16 +283,56 @@ app.get("/video/:id", (c) => {
     headers: { "Content-Length": String(total), "Content-Type": ctype, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": origin },
   });
 });
+// ── Advertiser: create an ad (with uploaded video) + fund it ─────────────────
 app.post("/campaigns", async (c) => {
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("multipart/form-data")) {
+    const body = await c.req.parseBody();
+    const as = String(body.as ?? "");
+    if (!getUser(as)) return c.json({ error: "unknown user" }, 400);
+    const file = body.video as File | undefined;
+    let hasVideo = false;
+    let videoPath: string | undefined;
+    if (file && typeof file !== "string") { videoPath = await saveUploadedVideo(file); hasVideo = true; }
+    const campaign = addCampaign({
+      ownerId: as,
+      title: String(body.title ?? (typeof file !== "string" ? file?.name : "") ?? "Sponsored"),
+      tags: String(body.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      pricePerSec: body.pricePerSec ? String(body.pricePerSec) : undefined,
+      maxBudget: body.budget != null ? String(body.budget) : undefined,
+      hasVideo, videoPath,
+    });
+    return c.json({ campaign });
+  }
   const b = await c.req.json().catch(() => ({}));
   if (!getUser(b?.as)) return c.json({ error: "unknown user" }, 400);
   const campaign = addCampaign({
     ownerId: b.as,
+    title: b.title,
     tags: Array.isArray(b.tags) ? b.tags : String(b.tags ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
     pricePerSec: b.pricePerSec,
-    maxBudget: b.maxBudget,
+    maxBudget: b.maxBudget != null ? String(b.maxBudget) : undefined,
   });
   return c.json({ campaign });
+});
+
+/** Fund an ad: faucet the advertiser's WALLET (so it can actually pay) AND raise
+ *  the committed budget cap. One click = "this ad is now funded". */
+app.post("/campaigns/:id/fund", async (c) => {
+  const id = c.req.param("id");
+  const camp = getCampaign(id);
+  if (!camp) return c.json({ error: "campaign not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  const addUsd = Number(b?.amountUsd) > 0 ? Number(b.amountUsd) : 0.2;
+  const company = getUser(camp.ownerId);
+  let balance = 0;
+  let tx: string | undefined;
+  if (company) {
+    try { tx = await fundWallet(company.address, "5"); } catch { /* faucet busy — budget still raised */ }
+    try { balance = await pathUsdBalance(company.address); } catch { /* ignore */ }
+  }
+  const maxBudget = fundCampaign(id, addUsd);
+  return c.json({ ok: true, id, maxBudget, balance, tx });
 });
 
 // ── Attention heartbeats (gate input) ───────────────────────────────────────
@@ -289,7 +357,10 @@ app.post("/demo/run-ad", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const campaignId = String(b?.campaignId ?? "");
   const viewerId = String(b?.viewerId ?? "");
-  if (!getCampaign(campaignId) || !getUser(viewerId)) return c.json({ error: "bad campaignId/viewerId" }, 400);
+  const campaign = getCampaign(campaignId);
+  if (!campaign || !getUser(viewerId)) return c.json({ error: "bad campaignId/viewerId" }, 400);
+  // No funding → no payout. Don't even spawn the payer for an unfunded ad.
+  if (campaignRemaining(campaign) < Number(campaign.pricePerSec)) return c.json({ ok: false, reason: "unfunded" });
   if (!isAdRunning(campaignId, viewerId)) void runAd(campaignId, viewerId); // background
   return c.json({ ok: true, running: true });
 });

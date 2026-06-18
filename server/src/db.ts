@@ -26,10 +26,16 @@ db.exec(`
     videoPath TEXT, thumb TEXT, createdAt INTEGER
   );
   CREATE TABLE IF NOT EXISTS campaigns (
-    id TEXT PRIMARY KEY, advertiser TEXT, ownerId TEXT, tags TEXT,
-    pricePerSec TEXT, maxBudget TEXT
+    id TEXT PRIMARY KEY, advertiser TEXT, ownerId TEXT, title TEXT, tags TEXT,
+    pricePerSec TEXT, maxBudget TEXT, hasVideo INTEGER, videoPath TEXT, thumb TEXT
   );
 `);
+
+// Migrate pre-existing DBs (added ad-video + funding columns). Each ALTER throws
+// if the column already exists — ignore that.
+for (const col of ["title TEXT", "hasVideo INTEGER DEFAULT 0", "videoPath TEXT", "thumb TEXT"]) {
+  try { db.exec(`ALTER TABLE campaigns ADD COLUMN ${col}`); } catch { /* already present */ }
+}
 
 export interface DbUser {
   id: string;
@@ -85,21 +91,33 @@ export function clipInsert(c: ClipRow & { createdAt?: number }) {
       c.videoPath ?? null, c.thumb ?? null, c.createdAt ?? Date.now());
 }
 
-// ── Campaigns ────────────────────────────────────────────────────────────────
-function rowToCampaign(r: any): Campaign {
-  return { id: r.id, advertiser: r.advertiser, ownerId: r.ownerId, tags: JSON.parse(r.tags || "[]"), pricePerSec: r.pricePerSec, maxBudget: r.maxBudget };
+// ── Campaigns (ads) ──────────────────────────────────────────────────────────
+export type CampaignRow = Campaign & { videoPath?: string };
+function rowToCampaign(r: any): CampaignRow {
+  return {
+    id: r.id, advertiser: r.advertiser, ownerId: r.ownerId, title: r.title || undefined,
+    tags: JSON.parse(r.tags || "[]"), pricePerSec: r.pricePerSec, maxBudget: r.maxBudget,
+    hasVideo: !!r.hasVideo, videoPath: r.videoPath || undefined, thumb: r.thumb || undefined,
+  };
 }
 export function campaignsCount(): number {
   return (db.prepare("SELECT COUNT(*) n FROM campaigns").get() as any).n as number;
 }
-export function campaignsAll(): Campaign[] {
+export function campaignsAll(): CampaignRow[] {
   return (db.prepare("SELECT * FROM campaigns").all() as any[]).map(rowToCampaign);
 }
-export function campaignById(id: string): Campaign | undefined {
+export function campaignById(id: string): CampaignRow | undefined {
   const r = db.prepare("SELECT * FROM campaigns WHERE id=?").get(id);
   return r ? rowToCampaign(r) : undefined;
 }
-export function campaignInsert(c: Campaign) {
-  db.prepare("INSERT OR REPLACE INTO campaigns (id,advertiser,ownerId,tags,pricePerSec,maxBudget) VALUES (?,?,?,?,?,?)")
-    .run(c.id, c.advertiser, c.ownerId, JSON.stringify(c.tags), c.pricePerSec, c.maxBudget);
+export function campaignInsert(c: CampaignRow) {
+  db.prepare(`INSERT OR REPLACE INTO campaigns
+    (id,advertiser,ownerId,title,tags,pricePerSec,maxBudget,hasVideo,videoPath,thumb)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(c.id, c.advertiser, c.ownerId, c.title ?? null, JSON.stringify(c.tags),
+      c.pricePerSec, c.maxBudget, c.hasVideo ? 1 : 0, c.videoPath ?? null, c.thumb ?? null);
+}
+/** Raise an ad's funded budget cap (advertiser tops up funding). */
+export function campaignSetBudget(id: string, maxBudget: string) {
+  db.prepare("UPDATE campaigns SET maxBudget=? WHERE id=?").run(maxBudget, id);
 }

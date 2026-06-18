@@ -8,7 +8,8 @@ import { PRICES } from "@flow/shared";
 import { getUser } from "./users.js";
 import {
   clipsCount, clipsAll, clipById, clipInsert,
-  campaignsCount, campaignsAll, campaignById, campaignInsert,
+  campaignsCount, campaignsAll, campaignById, campaignInsert, campaignSetBudget,
+  type CampaignRow,
 } from "./db.js";
 
 const PLATFORM = "0xF10W0000000000000000000000000000000000FE" as `0x${string}`;
@@ -39,8 +40,11 @@ export function initContent(): void {
     }
   }
   if (campaignsCount() === 0) {
-    campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "1.0" });
-    campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "1.0" });
+    // camp-tempo ships FUNDED ($0.20 committed) → viewers can earn from it.
+    // camp-acme ships UNFUNDED ($0) → it cannot pay until Acme funds it (demo of
+    // the rule: "no funding → no payout").
+    campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", title: "Send money at the speed of light", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "0.20", hasVideo: false, thumb: "🛰️" });
+    campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", title: "Deploy in one command", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "0", hasVideo: false, thumb: "☁️" });
   }
 }
 
@@ -68,13 +72,30 @@ export function addClip(input: {
   return pub as Clip;
 }
 
-export function addCampaign(input: { ownerId: string; tags: string[]; pricePerSec?: string; maxBudget?: string }): Campaign {
+/** Advertiser creates an ad (optionally with an uploaded ad video + funded budget). */
+export function addCampaign(input: {
+  ownerId: string; tags: string[]; title?: string; pricePerSec?: string; maxBudget?: string;
+  hasVideo?: boolean; videoPath?: string; thumb?: string;
+}): Campaign {
   const owner = getUser(input.ownerId);
   if (!owner) throw new Error("unknown owner");
-  const camp: Campaign = {
+  const camp: CampaignRow = {
     id: `camp-${owner.id}-${Date.now().toString(36)}`, advertiser: owner.name, ownerId: owner.id,
-    tags: input.tags, pricePerSec: input.pricePerSec ?? PRICES.attentionPerSecond, maxBudget: input.maxBudget ?? "1.0",
+    title: input.title, tags: input.tags,
+    pricePerSec: input.pricePerSec ?? PRICES.attentionPerSecond,
+    maxBudget: input.maxBudget ?? "0", // new ads start UNFUNDED until the advertiser funds them
+    hasVideo: !!input.hasVideo, videoPath: input.videoPath, thumb: input.thumb ?? "📣",
   };
   campaignInsert(camp);
-  return camp;
+  const { videoPath, ...pub } = camp;
+  return pub as Campaign;
+}
+
+/** Top up an ad's funded budget cap by `addUsd` (returns the new total). */
+export function fundCampaign(id: string, addUsd: number): string {
+  const camp = campaignById(id);
+  if (!camp) throw new Error("unknown campaign");
+  const next = (+(Number(camp.maxBudget) + addUsd).toFixed(6)).toString();
+  campaignSetBudget(id, next);
+  return next;
 }

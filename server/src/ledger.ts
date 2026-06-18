@@ -65,6 +65,14 @@ export function snapshot(address?: string) {
   };
 }
 
+/** Total settled payout attributed to one piece of content (clip or ad). For ads
+ *  this is the funded budget already spent — used to gate further payments. */
+export function spentOn(contentId: string): number {
+  let s = 0;
+  for (const f of flows) if (f.contentId === contentId) s += f.amount;
+  return +s.toFixed(6);
+}
+
 function view(fs: Flow[]) {
   return fs.map((f) => ({
     id: f.id,

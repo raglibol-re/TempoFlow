@@ -31,14 +31,29 @@ export interface Clip {
   thumb?: string;
 }
 
-/** An advertiser campaign that pays viewers for attention. */
+/** An advertiser ad: a funded video that pays viewers per second of attention.
+ *  Money is pulled from the advertiser's wallet automatically; once the funded
+ *  budget is spent the ad can no longer pay (see `funded`). */
 export interface Campaign {
   id: string;
   advertiser: string; // display name
   ownerId: string; // User.id of the company
+  title?: string; // ad title
   tags: string[]; // targeting
   pricePerSec: string; // USD paid to the viewer
-  maxBudget: string; // USD total campaign budget
+  maxBudget: string; // USD funded budget cap (the advertiser's committed funding)
+  /** True if a real uploaded ad video is stored (served at /video/:id). */
+  hasVideo?: boolean;
+  thumb?: string; // poster emoji when no video
+  // ── API-computed (GET /campaigns) ──
+  /** Funded budget already paid out (USD). */
+  spentUsd?: number;
+  /** Remaining funded budget (USD). */
+  remainingUsd?: number;
+  /** On-chain pathUSD balance of the advertiser wallet (its ability to pay). */
+  advertiserBalance?: number;
+  /** True only if there is remaining budget AND the advertiser wallet can pay. */
+  funded?: boolean;
 }
 
 /** A revenue split entry (used for collab creators). */
