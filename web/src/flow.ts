@@ -9,7 +9,7 @@ import { createPublicClient, createWalletClient, http, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet,
-  type Clip, type Campaign, type Role,
+  type Clip, type Campaign, type Role, type Goal, type AuctionResult, type LiveStats,
 } from "@flow/shared";
 
 /**
@@ -49,7 +49,9 @@ export interface Profile {
   following: Supporter[];
   clips: Clip[];
   viewerFollows: boolean;
+  goals?: Goal[];
 }
+export type { Goal, AuctionResult, LiveStats };
 
 async function jget(path: string, label: string): Promise<any> {
   try {
@@ -79,8 +81,8 @@ export const resetNet = () => jpost("/reset", {}, "reset").catch(() => {});
 export interface AttentionChallenge { id: string; x: number; y: number; answerMs: number }
 export interface HeartbeatResult { ok: boolean; paused?: boolean; reason?: string; challenge: AttentionChallenge | null }
 /** Open an attention session → token every heartbeat must carry (Layer 3). */
-export const openAttentionSession = (campaignId: string, viewer: string) =>
-  jpost("/attention/session", { campaignId, viewer }, "open attention session").then((j) => j.token as string).catch(() => undefined);
+export const openAttentionSession = (campaignId: string, viewer: string, rewardRate?: number) =>
+  jpost("/attention/session", { campaignId, viewer, rewardRate }, "open attention session").then((j) => j.token as string).catch(() => undefined);
 /** Send a heartbeat with the session token + live attention signals (Layer 1).
  *  Returns the server's verdict, including any challenge to render (Layer 2). */
 export const sendHeartbeat = (
@@ -96,6 +98,55 @@ export const answerChallenge = (campaignId: string, viewer: string, token: strin
 export const stopAd = (campaignId: string, viewer: string) =>
   jpost(`/attention/${campaignId}/${viewer}/stop`, {}, "stop ad").catch(() => {});
 export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-ad", { campaignId, viewerId }, "start advertiser").catch(() => {});
+
+// ── Feature 1: live tip boost ────────────────────────────────────────────────
+export const sendTip = (as: string, clipId: string, amountUsd: number) =>
+  jpost("/tip", { as, clipId, amountUsd }, "send tip") as Promise<{ ok: boolean; balance: number; reason?: string }>;
+
+// ── Feature 2: real-time attention auction ───────────────────────────────────
+export const runAuction = (viewer: string) =>
+  jpost("/auction/run", { viewer }, "run auction") as Promise<AuctionResult>;
+
+// ── Feature 3: pay-per-token creator AI (NDJSON stream) ──────────────────────
+export interface AskEvent { type: "start" | "token" | "done" | "out-of-balance" | "error"; text?: string; tokens?: number; costUsd?: number; balance?: number; via?: string; pricePerToken?: number; creator?: string; error?: string }
+/** Stream a creator-AI answer, billing per token. Calls `onEvent` for each NDJSON
+ *  line. Returns an abort function. */
+export function askCreator(creatorId: string, as: string, question: string, onEvent: (e: AskEvent) => void): () => void {
+  const ctl = new AbortController();
+  (async () => {
+    try {
+      const r = await fetch(`${SERVER_URL}/ask/${creatorId}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ as, question }), signal: ctl.signal,
+      });
+      if (!r.ok || !r.body) { onEvent({ type: "error", error: `HTTP ${r.status}` }); return; }
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop() ?? "";
+        for (const line of lines) { const t = line.trim(); if (!t) continue; try { onEvent(JSON.parse(t) as AskEvent); } catch { /* partial */ } }
+      }
+    } catch (e: any) { if (e?.name !== "AbortError") onEvent({ type: "error", error: e?.message ?? String(e) }); }
+  })();
+  return () => ctl.abort();
+}
+
+// ── Feature 4: crowdfund goals ───────────────────────────────────────────────
+export const fetchGoals = (creatorId: string, viewer?: string) =>
+  jget(`/goals?creator=${creatorId}${viewer ? `&viewer=${viewer}` : ""}`, "load goals").then((j) => (j.goals ?? []) as Goal[]);
+export const createGoal = (as: string, title: string, targetUsd: number, minutes?: number) =>
+  jpost("/goals", { as, title, targetUsd, minutes }, "create goal").then((j) => j.goal as Goal);
+export const pledgeGoal = (goalId: string, as: string, amountUsd: number) =>
+  jpost(`/goals/${goalId}/pledge`, { as, amountUsd }, "pledge") as Promise<{ ok: boolean; balance?: number; reason?: string; goal: Goal }>;
+
+// ── Feature 5: go-live streaming ─────────────────────────────────────────────
+export const goLive = (as: string, title: string, tags: string[], pricePerSec?: string) =>
+  jpost("/live/start", { as, title, tags, pricePerSec }, "go live").then((j) => j.clip as Clip);
+export const stopLive = (id: string, as: string) => jpost(`/live/${id}/stop`, { as }, "end live").catch(() => {});
+export const cheerLive = (id: string) => jpost(`/live/${id}/cheer`, {}, "cheer").then((j) => j.applause as number).catch(() => 0);
+export const fetchLiveStats = (id: string) => jget(`/live/${id}/stats`, "live stats") as Promise<LiveStats>;
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;
 

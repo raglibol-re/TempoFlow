@@ -939,6 +939,7 @@ async function start() {
     routes: [
       { intent: "tempo/session", method: "get", path: "/watch/{contentId}", summary: "Watch a creator clip; viewer pays per second (recipient = that clip's creator).", options: { amount: raw(PRICES.creatorPerSecond), currency: FLOW_CURRENCY, decimals: TOKEN_DECIMALS, unitType: "second" } },
       { intent: "tempo/session", method: "get", path: "/attention/{campaignId}", summary: "Sell attention; advertiser pays the viewer (?to) per second (recipient = viewer).", options: { amount: raw(PRICES.attentionPerSecond), currency: FLOW_CURRENCY, decimals: TOKEN_DECIMALS, unitType: "second" } },
+      { intent: "tempo/session", method: "post", path: "/ask/{creatorId}", summary: "Chat a creator's AI; viewer pays PER TOKEN, revenue split to the creator (recipient = creator).", options: { amount: raw(PRICES.askPerToken), currency: FLOW_CURRENCY, decimals: TOKEN_DECIMALS, unitType: "token" } },
     ],
   });
   app.get("/openapi.json", (c) => c.json(doc));
