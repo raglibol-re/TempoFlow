@@ -11,6 +11,7 @@ import {
   TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet, TEMPO_EXPLORER_URL, TEMPO_APP_URL,
   type Clip, type Campaign, type Role, type Goal, type AuctionResult, type LiveStats, type SocialComment,
 } from "@flow/shared";
+import type { SecondPopularity } from "./video-timeline";
 
 export type { SocialComment };
 
@@ -207,6 +208,7 @@ export const deleteClip = (id: string, as: string) =>
 
 // ── Social: views, likes, comments, live chat ────────────────────────────────
 export interface SocialSnapshot { views: number; likeCount: number; liked: boolean; comments: SocialComment[] }
+export interface VideoPopularitySnapshot { videoId: string; duration: number; popularity: SecondPopularity[] }
 /** Count one view (fire-and-forget when a watch session starts). */
 export const viewClip = (id: string) => jpost(`/clips/${id}/view`, {}, "count view").catch(() => ({ views: 0 }));
 /** Toggle the current user's like → returns the new state + total count. */
@@ -215,6 +217,8 @@ export const toggleLike = (id: string, as: string) =>
 /** Views + likes + comment thread for a clip's watch page. */
 export const fetchSocial = (id: string, viewer?: string) =>
   jget(`/clips/${id}/social${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`, "load social") as Promise<SocialSnapshot>;
+export const fetchVideoPopularity = (id: string) =>
+  jget(`/videos/${id}/popularity`, "load popularity") as Promise<VideoPopularitySnapshot>;
 /** Post a comment → returns the new comment. */
 export const postComment = (id: string, as: string, body: string) =>
   jpost(`/clips/${id}/comments`, { as, body }, "post comment").then((j) => j.comment as SocialComment);

@@ -70,6 +70,14 @@ db.exec(`
     ON ledger_transactions(stripePaymentIntentId)
     WHERE stripePaymentIntentId IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_ledger_user_status ON ledger_transactions(userId, status);
+  CREATE TABLE IF NOT EXISTS clip_second_popularity (
+    clipId TEXT NOT NULL,
+    second INTEGER NOT NULL,
+    watchCount INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (clipId, second)
+  );
+  CREATE INDEX IF NOT EXISTS idx_clip_second_popularity_clip
+    ON clip_second_popularity(clipId);
 `);
 
 // Migrate pre-existing DBs (added ad-video + funding columns). Each ALTER throws
@@ -331,6 +339,7 @@ export function clipDelete(id: string): string | undefined {
   db.prepare("DELETE FROM clip_likes WHERE clipId=?").run(id);
   db.prepare("DELETE FROM clip_comments WHERE clipId=?").run(id);
   db.prepare("DELETE FROM chat_messages WHERE clipId=?").run(id);
+  db.prepare("DELETE FROM clip_second_popularity WHERE clipId=?").run(id);
   return r?.videoPath || undefined;
 }
 
@@ -383,6 +392,51 @@ export function clipIncViews(clipId: string): number {
 }
 export const clipViews = (clipId: string): number =>
   ((db.prepare("SELECT views FROM clips WHERE id=?").get(clipId) as any)?.views ?? 0) as number;
+
+// ── Per-second clip popularity for dynamic pricing ───────────────────────────
+export interface ClipSecondPopularity {
+  clipId: string;
+  second: number;
+  watchCount: number;
+}
+
+export function clipSecondWatchCount(clipId: string, second: number): number {
+  const r = db.prepare("SELECT watchCount FROM clip_second_popularity WHERE clipId=? AND second=?").get(clipId, second) as any;
+  return r?.watchCount ?? 0;
+}
+
+export function clipSecondWatchCounts(clipId: string, startSecond: number, endSecond: number): Map<number, number> {
+  const rows = db.prepare(`
+    SELECT second, watchCount
+    FROM clip_second_popularity
+    WHERE clipId=? AND second>=? AND second<?
+  `).all(clipId, startSecond, endSecond) as any[];
+  return new Map(rows.map((r) => [Number(r.second), Number(r.watchCount)]));
+}
+
+export function clipSecondIncrementRange(clipId: string, startSecond: number, endSecond: number): void {
+  const insert = db.prepare("INSERT OR IGNORE INTO clip_second_popularity (clipId, second, watchCount) VALUES (?, ?, 0)");
+  const update = db.prepare("UPDATE clip_second_popularity SET watchCount=watchCount+1 WHERE clipId=? AND second=?");
+  db.exec("BEGIN");
+  try {
+    for (let second = startSecond; second < endSecond; second++) {
+      insert.run(clipId, second);
+      update.run(clipId, second);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+export function clipSecondSetWatchCount(clipId: string, second: number, watchCount: number): void {
+  db.prepare(`
+    INSERT INTO clip_second_popularity (clipId, second, watchCount)
+    VALUES (?, ?, ?)
+    ON CONFLICT(clipId, second) DO UPDATE SET watchCount=excluded.watchCount
+  `).run(clipId, second, Math.max(0, Math.floor(watchCount)));
+}
 
 // ── Campaigns (ads) ──────────────────────────────────────────────────────────
 export type CampaignRow = Campaign & { videoPath?: string };
