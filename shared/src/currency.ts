@@ -37,6 +37,11 @@ export const TEMPO_EXPLORER_URL =
 export const TEMPO_APP_URL =
   env("TEMPO_APP_URL") ?? "https://tempo.xyz";
 
+/** The platform's transparent margin (fraction, e.g. 0.03 = 3%). FLOW shows this in
+ *  the open ledger instead of hiding it like a blackbox middleman. Override via
+ *  PLATFORM_FEE. */
+export const PLATFORM_FEE = Math.min(0.2, Math.max(0, Number(env("PLATFORM_FEE") ?? 0.03)));
+
 /** TIP-20 token decimals (pathUSD + all Tempo tokens). */
 export const TOKEN_DECIMALS = 6;
 

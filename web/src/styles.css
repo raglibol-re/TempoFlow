@@ -389,6 +389,16 @@ textarea.input { resize: vertical; font-family: inherit; }
 @media (max-width: 820px) { .flow-stage { grid-template-columns: 1fr; } }
 .flow-pane .player { aspect-ratio: 16/9; margin-bottom: 8px; }
 .flow-controls { display: flex; justify-content: center; margin-top: 18px; }
+
+/* ---- §3 transparency: glass ledger ---- */
+.ledger { max-width: 640px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 8px 16px; }
+.ledger-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; }
+.ledger-row + .ledger-row { border-top: 1px solid var(--border); }
+.ledger-k { font-weight: 700; font-size: 14px; }
+.ledger-v { font-weight: 800; font-variant-numeric: tabular-nums; font-size: 16px; }
+.ledger-sep { height: 2px; background: var(--border); margin: 2px 0; }
+.ledger-row.big .ledger-k { font-size: 16px; }
+.ledger-row.big .ledger-v { font-size: 24px; }
 .linkbtn { border: none; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; }
 .linkbtn:hover { color: #fff; }
 

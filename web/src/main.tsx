@@ -11,6 +11,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { SparklesCore } from "@/components/ui/sparkles";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
+import { PLATFORM_FEE } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
@@ -1405,6 +1406,67 @@ function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => voi
   );
 }
 
+// ───────────────────────── §3 transparency: glass ledger ─────────────────────
+function LedgerRow({ k, v, dir, note, big }: { k: string; v: number; dir: "in" | "out" | "fee" | "net"; note?: string; big?: boolean }) {
+  const color = dir === "in" ? "var(--in)" : dir === "out" ? "var(--out)" : dir === "fee" ? "var(--accent2)" : v >= 0 ? "var(--in)" : "var(--out)";
+  const sign = dir === "in" ? "+" : dir === "out" ? "−" : dir === "fee" ? "•" : v >= 0 ? "+" : "−";
+  return (
+    <div className={"ledger-row" + (big ? " big" : "")}>
+      <div><div className="ledger-k">{k}</div>{note && <div className="muted" style={{ fontSize: 11.5 }}>{note}</div>}</div>
+      <div className="ledger-v" style={{ color }}>{sign} {usd(Math.abs(v))}</div>
+    </div>
+  );
+}
+/** The "we replace the blackbox middleman" view: a glass ledger over the REAL on-chain
+ *  flows for this wallet, with the platform margin shown (not hidden) and every figure
+ *  verifiable in the Tempo explorer. */
+function TransparencyView({ me, onBack }: { me: DemoUser; onBack: () => void }) {
+  const [net, setNet] = useState<NetSnapshot | null>(null);
+  useEffect(() => {
+    let on = true;
+    const tick = () => fetchNet(me.id).then((n) => { if (on) setNet(n); }).catch(() => {});
+    tick(); const id = setInterval(tick, 2000); return () => { on = false; clearInterval(id); };
+  }, [me.id]);
+  const out = net?.outUsd ?? 0;
+  const inUsd = net?.inUsd ?? 0;
+  const margin = +(out * PLATFORM_FEE).toFixed(6);
+  const creatorGot = +(out - margin).toFixed(6);
+  const netUsd = +(inUsd - out).toFixed(6);
+  return (
+    <div className="page">
+      <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back</button><span className="muted">Open ledger · no blackbox middleman</span></div>
+      <div className="section-title">Glass ledger — every euro on-chain</div>
+      <div className="muted" style={{ marginTop: -8, marginBottom: 16, fontSize: 13, maxWidth: 640 }}>
+        FLOW replaces the opaque platform middleman with an open protocol. Every figure below is a real on-chain pathUSD flow on Tempo testnet, settled in MPP payment channels and verifiable in the explorer. The platform margin is <b>shown, not hidden</b>.
+      </div>
+      <div className="ledger">
+        <LedgerRow k="Viewer paid (you → creators)" v={out} dir="out" note="per-second watchtime" />
+        <LedgerRow k="Creator received" v={creatorGot} dir="out" note={`${Math.round((1 - PLATFORM_FEE) * 100)}% of watch spend`} />
+        <LedgerRow k={`Platform margin (${(PLATFORM_FEE * 100).toFixed(0)}%)`} v={margin} dir="fee" note="transparent · configurable · not hidden" />
+        <div className="ledger-sep" />
+        <LedgerRow k="Advertiser paid (→ you)" v={inUsd} dir="in" note="per verified second of attention" />
+        <div className="ledger-sep" />
+        <LedgerRow k="Your net cost to watch" v={netUsd} dir="net" note="ads finance the creators you watch" big />
+      </div>
+      <div className="receipt" style={{ marginTop: 16, maxWidth: 640 }}>
+        <div className="statline"><span className="k">your wallet (all txs)</span><a className="mono" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer">{me.address.slice(0, 14)}…↗</a></div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Per-second micro-payments settle off-chain as signed channel vouchers and finalize on-chain at session end — thousands of sub-cent transfers that are only economical on Tempo.</div>
+      </div>
+      {net && net.events.length > 0 && (
+        <div className="feed-events" style={{ marginTop: 16, maxWidth: 640 }}>
+          <div className="role-chip">recent on-chain flows</div>
+          {net.events.slice(0, 12).map((e) => (
+            <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+              <span style={{ color: e.direction === "in" ? "var(--in)" : "var(--out)" }}>{e.direction === "in" ? "▲ from" : "▼ to"} {e.counterparty}</span>
+              <span className="muted">{usd(Number(e.amount))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ───────────────────────── §2 Live-Saldo + §5 agent + §A dynamic pricing ─────
 /** Big animated money counter (sub-cent precision so it's obvious this needs Tempo). */
 function FlowCounter({ label, amount, dir, sub }: { label: string; amount: number; dir: "in" | "out" | "net"; sub?: ReactNode }) {
@@ -1794,6 +1856,7 @@ function App() {
     ["studio", "Studio"],
     ["earn", "Earn"],
     ["campaigns", "Ads"],
+    ["ledger", "Ledger"],
   ];
   const go = (v: string) => { setView(v); setCurrent(null); setSearch(""); };
   const userById = (uid: string) => users.find((u) => u.id === uid);
@@ -1835,7 +1898,9 @@ function App() {
       {paymentNotice && <div className="page" style={{ paddingBottom: 0 }}><div className="receipt">{paymentNotice}<button className="btn-ghost btn btn-sm" onClick={() => setPaymentNotice(null)}>×</button></div></div>}
       {topupOpen && <TopupModal me={me} onClose={() => setTopupOpen(false)} onError={setError} />}
 
-      {view === "flow" && (current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])
+      {view === "ledger"
+        ? <TransparencyView me={me} onBack={() => go("home")} />
+        : view === "flow" && (current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])
         ? <FlowSession key="flow" clip={(current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])!} me={me} onBack={() => go("home")} onError={setError} />
         : view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
