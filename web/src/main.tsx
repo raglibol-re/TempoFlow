@@ -1852,6 +1852,38 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
   );
 }
 
+/** Explains the whole concept in one glance, at the top of Home. The thesis in three
+ *  steps + a CTA into the Live-Saldo demo — so a first-time visitor "gets it" instantly. */
+function ConceptHero({ onTry }: { onTry: () => void }) {
+  return (
+    <div className="concept">
+      <div className="concept-title">Watching that <span style={{ color: "var(--in)" }}>pays for itself</span></div>
+      <div className="muted concept-sub">Money flows both ways in real time, on-chain — no subscription, no blackbox middleman.</div>
+      <div className="concept-steps">
+        <div className="concept-step">
+          <div className="concept-ico" style={{ color: "var(--out)" }}>▼</div>
+          <b>You watch → you pay</b>
+          <span className="muted">creators are paid <b>per second</b> you watch — sub-cent, on-chain (≈ $0.0003/s)</span>
+        </div>
+        <div className="concept-step">
+          <div className="concept-ico" style={{ color: "var(--in)" }}>▲</div>
+          <b>Ads pay you</b>
+          <span className="muted">earn <b>per verified second</b> of attention — priced live by autonomous advertiser agents</span>
+        </div>
+        <div className="concept-step">
+          <div className="concept-ico">⚖</div>
+          <b>Net ≈ €0</b>
+          <span className="muted">“20 min watched, ~€0 net.” Every cent is traceable in the open ledger</span>
+        </div>
+      </div>
+      <div className="concept-cta">
+        <button className="btn btn-lg" onClick={onTry}>▶ See the live balance</button>
+        <span className="muted" style={{ fontSize: 12 }}>Powered by Tempo + MPP — thousands of sub-cent payments per second, settled on-chain. ⚠️ Testnet.</span>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
   const [me, setMe] = useState<DemoUser | null>(null);
@@ -2014,9 +2046,9 @@ function App() {
   const nav: [string, string][] = [
     ["home", "Home"],
     ["flow", "⚡ Live Saldo"],
-    ["studio", "Studio"],
-    ["earn", "Earn"],
-    ["campaigns", "Ads"],
+    ["earn", "Earn from ads"],
+    ["studio", "Creator Studio"],
+    ["campaigns", "Advertise"],
     ["ledger", "Ledger"],
   ];
   const go = (v: string) => { setView(v); setCurrent(null); setSearch(""); };
@@ -2074,7 +2106,8 @@ function App() {
         : (
           <div className="page">
             {view === "home" && (<>
-              <div className="section-title">Browse — pay only while you watch</div>
+              <ConceptHero onTry={() => go("flow")} />
+              <div className="section-title">Browse creators — you pay per second only while watching</div>
               {feed.length ? <div className="grid">{feed.map((c) => <VideoCard key={c.id} clip={c} owner={userById(c.ownerId)} onProfile={openProfile} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">loading feed…</div>}
             </>)}
 

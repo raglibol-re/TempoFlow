@@ -410,6 +410,18 @@ textarea.input { resize: vertical; font-family: inherit; }
 .ledger-sep { height: 2px; background: var(--border); margin: 2px 0; }
 .ledger-row.big .ledger-k { font-size: 16px; }
 .ledger-row.big .ledger-v { font-size: 24px; }
+
+/* ---- Concept hero (Home explainer — makes the whole idea clear at a glance) ---- */
+.concept { border: 1px solid var(--border); border-radius: 16px; background: linear-gradient(180deg, var(--surface2), var(--surface)); padding: 22px 22px 20px; margin-bottom: 22px; }
+.concept-title { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+.concept-sub { font-size: 13.5px; margin-top: 4px; }
+.concept-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+@media (max-width: 760px) { .concept-steps { grid-template-columns: 1fr; } }
+.concept-step { display: flex; flex-direction: column; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 13px 14px; }
+.concept-step b { font-size: 14px; }
+.concept-step .muted { font-size: 12.5px; line-height: 1.4; }
+.concept-ico { font-size: 20px; font-weight: 800; line-height: 1; }
+.concept-cta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .linkbtn { border: none; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; }
 .linkbtn:hover { color: #fff; }
 
