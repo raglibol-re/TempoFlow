@@ -761,9 +761,12 @@ async function start() {
   });
   app.get("/openapi.json", (c) => c.json(doc));
 
-  const port = Number(process.env.SERVER_PORT ?? 3000);
-  serve({ fetch: app.fetch, port });
-  console.log(`[flow-server] listening on http://localhost:${port} — ${users.length} users, ${getClips().length} clips`);
+  // PORT is what most hosts inject (Render/Fly/Heroku); SERVER_PORT is our local
+  // default. Bind 0.0.0.0 so the container is reachable from outside (not just
+  // localhost) → the Vercel frontend can hit it from any device.
+  const port = Number(process.env.PORT ?? process.env.SERVER_PORT ?? 3000);
+  serve({ fetch: app.fetch, port, hostname: "0.0.0.0" });
+  console.log(`[flow-server] listening on 0.0.0.0:${port} — ${users.length} users, ${getClips().length} clips`);
 }
 
 start();
