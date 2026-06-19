@@ -40,11 +40,11 @@ export function initContent(): void {
     }
   }
   if (campaignsCount() === 0) {
-    // camp-tempo ships FUNDED ($0.20 committed) → viewers can earn from it.
-    // camp-acme ships UNFUNDED ($0) → it cannot pay until Acme funds it (demo of
-    // the rule: "no funding → no payout").
-    campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", title: "Send money at the speed of light", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "0.20", hasVideo: false, thumb: "🛰️" });
-    campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", title: "Deploy in one command", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "0", hasVideo: false, thumb: "☁️" });
+    // Both seed ads ship FUNDED ($5) so they reliably start in the demo. The
+    // "no funding → no payout" rule is still enforced — newly created ads start
+    // at $0 until the advertiser funds them.
+    campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", title: "Send money at the speed of light", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "5", hasVideo: false, thumb: "🛰️" });
+    campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", title: "Deploy in one command", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "5", hasVideo: false, thumb: "☁️" });
   }
 }
 

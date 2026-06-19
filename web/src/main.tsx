@@ -177,7 +177,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
         <div>
           <div className="player">
             {clip.hasVideo
-              ? <video ref={video} src={videoSrc(clip.id)} loop muted playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
+              ? <video ref={video} src={videoSrc(clip.id)} loop playsInline controls style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
             {phase === "idle" && <div className="ov">▶ Press “Watch” to start — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
             {phase === "opening" && <div className="ov">opening payment channel on Tempo… (~3–6s)</div>}
@@ -275,12 +275,22 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   const funded = ad.funded ?? budget - spent >= price;
   const live = attention && started && funded; // channel open, paying, attentive
 
-  // Play the ad ONLY while it's actually being paid for (never before the channel
-  // opens, and not after funding runs out).
+  // Play the ad ONLY while it's actually being paid for. Try with sound; if the
+  // browser blocks unmuted autoplay, fall back to muted so it still plays.
   useEffect(() => {
-    if (live) video.current?.play().catch(() => {});
-    else video.current?.pause();
+    const v = video.current; if (!v) return;
+    if (live) { v.muted = false; v.play().catch(() => { v.muted = true; v.play().catch(() => {}); }); }
+    else v.pause();
   }, [live]);
+
+  // Never get stuck on "opening" — if the ad is funded and you're watching but no
+  // payment has registered after a grace period (slow channel / self-watch), start
+  // anyway so the ad isn't blocked forever.
+  useEffect(() => {
+    if (!funded || !attention || started) return;
+    const t = setTimeout(() => setStarted(true), 9000);
+    return () => clearTimeout(t);
+  }, [funded, attention, started]);
 
   return (
     <div className="page">
@@ -289,7 +299,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
         <div>
           <div className="player ad">
             {ad.hasVideo
-              ? <video ref={video} src={videoSrc(ad.id)} loop muted playsInline style={{ opacity: live ? 1 : 0.35 }} />
+              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
             {!funded
