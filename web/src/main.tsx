@@ -758,6 +758,94 @@ function AccountMenu({ me, balance, onProfile, onTopup, onLogout }: { me: DemoUs
   );
 }
 
+function GlobalSearch({
+  query,
+  users,
+  clips,
+  userById,
+  onQuery,
+  onOpenProfile,
+  onOpenClip,
+}: {
+  query: string;
+  users: DemoUser[];
+  clips: Clip[];
+  userById: (uid: string) => DemoUser | undefined;
+  onQuery: (q: string) => void;
+  onOpenProfile: (id: string) => void;
+  onOpenClip: (clip: Clip) => void;
+}) {
+  const q = query.trim().toLowerCase();
+  const profiles = q
+    ? users
+        .filter((u) => [u.name, u.handle, u.role, u.bio ?? ""].join(" ").toLowerCase().includes(q))
+        .slice(0, 5)
+    : [];
+  const videos = q
+    ? clips
+        .filter((c) => [c.title, c.creator, ...c.tags].join(" ").toLowerCase().includes(q))
+        .slice(0, 6)
+    : [];
+  const hasResults = profiles.length > 0 || videos.length > 0;
+  const openProfile = (id: string) => { onQuery(""); onOpenProfile(id); };
+  const openClip = (clip: Clip) => { onQuery(""); onOpenClip(clip); };
+
+  return (
+    <div className="global-search">
+      <input
+        className="search-input"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Search profiles or videos"
+        aria-label="Search profiles or videos"
+      />
+      {q && (
+        <div className="search-panel">
+          {hasResults ? (
+            <>
+              {profiles.length > 0 && (
+                <div className="search-section">
+                  <div className="search-label">Profiles</div>
+                  {profiles.map((u) => (
+                    <button key={u.id} className="search-row" onClick={() => openProfile(u.id)}>
+                      <Avatar user={u} size={34} />
+                      <span className="search-copy">
+                        <b>{u.name}</b>
+                        <small>@{u.handle} · {u.role}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {videos.length > 0 && (
+                <div className="search-section">
+                  <div className="search-label">Videos</div>
+                  {videos.map((clip) => {
+                    const owner = userById(clip.ownerId);
+                    return (
+                      <button key={clip.id} className="search-row" onClick={() => openClip(clip)}>
+                        <span className="search-thumb">
+                          {clip.hasVideo ? <video src={videoSrc(clip.id) + "#t=0.1"} muted playsInline /> : <span>{clip.thumb ?? "🎬"}</span>}
+                        </span>
+                        <span className="search-copy">
+                          <b>{clip.title}</b>
+                          <small>@{owner?.handle ?? clip.creator} · {usd(Number(clip.pricePerSec))}/sec</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="search-empty">No profiles or videos found.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => void; onError: (e: string) => void }) {
   const [amount, setAmount] = useState(10);
   const [busy, setBusy] = useState(false);
@@ -801,6 +889,7 @@ function App() {
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
   const [topupOpen, setTopupOpen] = useState(false);
+  const [search, setSearch] = useState("");
   // ad (earn)
   const [adCampaign, setAdCampaign] = useState<string | null>(null);
   // studio (creator upload)
@@ -884,7 +973,7 @@ function App() {
     ["earn", "Earn"],
     ["campaigns", "Ads"],
   ];
-  const go = (v: string) => { setView(v); setCurrent(null); };
+  const go = (v: string) => { setView(v); setCurrent(null); setSearch(""); };
   const userById = (uid: string) => users.find((u) => u.id === uid);
 
   return (
@@ -892,6 +981,15 @@ function App() {
       <div className="nav">
         <div className="brand"><span className="dot" />Tempo<b>Flow</b></div>
         <div className="nav-links">{nav.map(([v, l]) => <button key={v} className={"nav-link" + (view === v ? " active" : "")} onClick={() => go(v)}>{l}</button>)}</div>
+        <GlobalSearch
+          query={search}
+          users={users}
+          clips={feed}
+          userById={userById}
+          onQuery={setSearch}
+          onOpenProfile={openProfile}
+          onOpenClip={(clip) => { setCurrent(clip); setAdCampaign(null); setProfileId(null); setView("watch"); }}
+        />
         <div className="nav-right">
           <span className="pill" title="your app balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>credit</span></span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
