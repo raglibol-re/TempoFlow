@@ -9,8 +9,10 @@ import { createPublicClient, createWalletClient, http, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet, TEMPO_EXPLORER_URL, TEMPO_APP_URL,
-  type Clip, type Campaign, type Role, type Goal, type AuctionResult, type LiveStats,
+  type Clip, type Campaign, type Role, type Goal, type AuctionResult, type LiveStats, type SocialComment,
 } from "@flow/shared";
+
+export type { SocialComment };
 
 /** Link a real on-chain tx / address to the Tempo block explorer + the Tempo app. */
 export const explorerTxUrl = (tx: string) => `${TEMPO_EXPLORER_URL}/tx/${tx}`;
@@ -202,6 +204,25 @@ export const updateClipMeta = (id: string, as: string, title: string, tags: stri
   jpost(`/clips/${id}/edit`, { as, title, tags }, "edit clip").then((j) => j.clip as Clip);
 export const deleteClip = (id: string, as: string) =>
   jpost(`/clips/${id}/delete`, { as }, "delete clip").then((j) => j as { ok: boolean; id: string });
+
+// ── Social: views, likes, comments, live chat ────────────────────────────────
+export interface SocialSnapshot { views: number; likeCount: number; liked: boolean; comments: SocialComment[] }
+/** Count one view (fire-and-forget when a watch session starts). */
+export const viewClip = (id: string) => jpost(`/clips/${id}/view`, {}, "count view").catch(() => ({ views: 0 }));
+/** Toggle the current user's like → returns the new state + total count. */
+export const toggleLike = (id: string, as: string) =>
+  jpost(`/clips/${id}/like`, { as }, "like").then((j) => j as { liked: boolean; count: number });
+/** Views + likes + comment thread for a clip's watch page. */
+export const fetchSocial = (id: string, viewer?: string) =>
+  jget(`/clips/${id}/social${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`, "load social") as Promise<SocialSnapshot>;
+/** Post a comment → returns the new comment. */
+export const postComment = (id: string, as: string, body: string) =>
+  jpost(`/clips/${id}/comments`, { as, body }, "post comment").then((j) => j.comment as SocialComment);
+/** Live chat: poll messages newer than `since` (ms epoch), and post a message. */
+export const fetchLiveChat = (id: string, since = 0) =>
+  jget(`/live/${id}/chat?since=${since}`, "load chat").then((j) => (j.messages ?? []) as SocialComment[]).catch(() => []);
+export const postLiveChat = (id: string, as: string, body: string) =>
+  jpost(`/live/${id}/chat`, { as, body }, "send chat").then((j) => j.message as SocialComment);
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;
 

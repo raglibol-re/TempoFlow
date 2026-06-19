@@ -17,6 +17,7 @@ import {
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  viewClip, toggleLike, fetchSocial, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser, type Goal, type AuctionResult, type LiveStats, type AskEvent,
@@ -84,6 +85,8 @@ const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", 
 function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: DemoUser) => void; onError: (e: string) => void }) {
   const [key, setKey] = useState(""); const [busy, setBusy] = useState(false);
   const [name, setName] = useState(""); const [handle, setHandle] = useState("");
+  const [created, setCreated] = useState<DemoUser | null>(null); // new account → show its key to save
+  const [copied, setCopied] = useState(false);
   const demo = users.filter((u) => u.key && !u.id.startsWith("me-")); // seed accounts only
   async function connect() {
     if (!key.trim()) return; setBusy(true);
@@ -92,29 +95,46 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
   }
   async function createAccount() {
     if (!name.trim() || !handle.trim()) return; setBusy(true);
-    try { onLogin(await registerAppAccount(name.trim(), handle.trim())); } catch (e: any) { onError(e?.message ?? String(e)); }
+    try { setCreated(await registerAppAccount(name.trim(), handle.trim())); } catch (e: any) { onError(e?.message ?? String(e)); }
     setBusy(false);
   }
+  const Hero = (
+    <div className="login-hero">
+      <SparklesCore background="transparent" minSize={0.6} maxSize={1.6} particleDensity={200} speed={1.4} particleColor="#9147ff" className="login-hero-sparkles" />
+      <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><BrandMark size={40} />Tempo<b>Flow</b></div>
+      <div className="login-hero-mask" />
+    </div>
+  );
+
+  // After creating an account: reveal the private key ONCE so the user can save it —
+  // that key is their login on any device, and is also exportable later in Settings.
+  if (created) {
+    return (
+      <div className="login">
+        {Hero}
+        <div className="login-card">
+          <h3 style={{ marginTop: 0 }}>✓ Account created — save your key</h3>
+          <div className="muted" style={{ marginBottom: 10, fontSize: 13 }}>
+            This private key <b>is</b> your login. Save it now — paste it under “Log in with your key” to return on any device. It’s also always available in <b>Settings → Export key</b> while you’re signed in. ⚠️ TESTNET key only — never a mainnet key.
+          </div>
+          <div className="mono" style={{ fontSize: 11, wordBreak: "break-all", background: "#0003", padding: "9px 10px", borderRadius: 8, lineHeight: 1.5 }}>{created.key || "(loading your key…)"}</div>
+          <div className="row" style={{ marginTop: 10, gap: 8 }}>
+            <button className="btn btn-sm" onClick={() => { if (created.key) { navigator.clipboard?.writeText(created.key); setCopied(true); setTimeout(() => setCopied(false), 1500); } }}>{copied ? "✓ copied" : "Copy key"}</button>
+            <button className="btn" style={{ flex: 1 }} onClick={() => onLogin(created)}>I saved it — enter TempoFlow →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="login">
-      <div className="login-hero">
-        <SparklesCore
-          background="transparent"
-          minSize={0.6}
-          maxSize={1.6}
-          particleDensity={200}
-          speed={1.4}
-          particleColor="#9147ff"
-          className="login-hero-sparkles"
-        />
-        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><BrandMark size={40} />Tempo<b>Flow</b></div>
-        {/* fade the sparkle field's edges into the page background */}
-        <div className="login-hero-mask" />
-      </div>
+      {Hero}
       <div className="muted" style={{ textAlign: "center", marginTop: 6 }}>Pay per second, earn from ads, and top up with Stripe.</div>
 
       <div className="login-card">
         <h3 style={{ marginTop: 0 }}>Create your account</h3>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>We create a real Tempo wallet for you. You’ll get a private key to save — that key is how you log back in later.</div>
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
           <input className="input" placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           <input className="input" placeholder="handle" value={handle} onChange={(e) => setHandle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createAccount()} />
@@ -123,35 +143,38 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
       </div>
 
       <div className="login-card">
-        <h3 style={{ marginTop: 0 }}>Or use a demo account</h3>
-        {["viewer", "creator", "advertiser"].map((r) => {
-          const us = demo.filter((u) => u.role === r); if (!us.length) return null;
-          return (
-            <div key={r} style={{ marginBottom: 10 }}>
-              <div className="role-chip" style={{ marginBottom: 6 }}>{ROLES[r]}</div>
-              <div className="login-grid">
-                {us.map((u) => (
-                  <button key={u.id} className="login-acct" onClick={() => onLogin(u)}>
-                    <span style={{ fontSize: 18 }}>{u.avatar}</span>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                      <b style={{ fontSize: 13 }}>{u.name}</b><span className="muted" style={{ fontSize: 11 }}>@{u.handle}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <details className="login-card">
-        <summary>Developer testnet login</summary>
-        <div className="muted" style={{ fontSize: 12.5, margin: "10px 0" }}>Optional: connect a testnet key for legacy Tempo/MPP demos. Normal users do not need this.</div>
+        <h3 style={{ marginTop: 0 }}>Returning? Log in with your key</h3>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste the private key you saved when you created your account — it brings back your channel, balance, and history.</div>
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} />
-          <button className="btn btn-ghost" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect testnet account"}</button>
+          <input className="input" type="password" placeholder="0x… your private key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} />
+          <button className="btn btn-ghost" onClick={connect} disabled={busy || !key.trim()}>{busy ? "logging in…" : "Log in with key"}</button>
+        </div>
+      </div>
+
+      <details className="login-card">
+        <summary>Or try a demo account</summary>
+        <div style={{ marginTop: 10 }}>
+          {["viewer", "creator", "advertiser"].map((r) => {
+            const us = demo.filter((u) => u.role === r); if (!us.length) return null;
+            return (
+              <div key={r} style={{ marginBottom: 10 }}>
+                <div className="role-chip" style={{ marginBottom: 6 }}>{ROLES[r]}</div>
+                <div className="login-grid">
+                  {us.map((u) => (
+                    <button key={u.id} className="login-acct" onClick={() => onLogin(u)}>
+                      <span style={{ fontSize: 18 }}>{u.avatar}</span>
+                      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                        <b style={{ fontSize: 13 }}>{u.name}</b><span className="muted" style={{ fontSize: 11 }}>@{u.handle}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </details>
-      <div className="login-foot">No payment keys are stored in the browser.</div>
+      <div className="login-foot">Your testnet key is your login — save it. Export it anytime in Settings.</div>
     </div>
   );
 }
@@ -226,6 +249,7 @@ function VideoCard({ clip, owner, onOpen, onProfile }: { clip: Clip; owner?: Pub
               : <>@{clip.creator}</>}
             {clip.recipients.length > 1 ? " · collab" : ""}
           </div>
+          <div className="vchan" style={{ marginTop: 2 }}>{clip.live ? "● live now" : `${clip.views ?? 0} views`}{(clip.likeCount ?? 0) > 0 ? ` · ♥ ${clip.likeCount}` : ""}{(clip.commentCount ?? 0) > 0 ? ` · 💬 ${clip.commentCount}` : ""}</div>
         </div>
       </div>
     </div>
@@ -325,6 +349,7 @@ function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser;
         <div className="panel">
           <h3><span className="livedot on" /> your live stream</h3>
           <LiveMeter clipId={clip.id} />
+          <div style={{ marginTop: 12 }}><LiveChat clipId={clip.id} me={me} /></div>
           <button className="btn" style={{ width: "100%", marginTop: 12, background: "var(--out)", borderColor: "var(--out)" }} onClick={() => end(onEnded)} disabled={ending}>{ending ? "ending…" : "■ End stream"}</button>
         </div>
       </div>
@@ -452,6 +477,96 @@ function AskCreatorBox({ creator, me, onBalance }: { creator: PublicUser; me: De
   );
 }
 
+// ───────────────────────── social: likes + comments ─────────────────────────
+function timeAgo(ts: number) {
+  const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+/** Likes + view count + comment thread for a clip (under the video, YouTube-style). */
+function SocialBar({ clip, me }: { clip: Clip; me: DemoUser }) {
+  const [snap, setSnap] = useState<{ views: number; likeCount: number; liked: boolean; comments: SocialComment[] } | null>(null);
+  const [draft, setDraft] = useState(""); const [busy, setBusy] = useState(false);
+  useEffect(() => { let on = true; fetchSocial(clip.id, me.id).then((s) => { if (on) setSnap(s); }).catch(() => {}); return () => { on = false; }; }, [clip.id, me.id]);
+  async function like() {
+    if (!snap) return;
+    setSnap({ ...snap, liked: !snap.liked, likeCount: snap.likeCount + (snap.liked ? -1 : 1) }); // optimistic
+    try { const r = await toggleLike(clip.id, me.id); setSnap((s) => (s ? { ...s, liked: r.liked, likeCount: r.count } : s)); } catch { /* corrected on next load */ }
+  }
+  async function comment() {
+    const body = draft.trim(); if (!body) return; setBusy(true);
+    try { const c = await postComment(clip.id, me.id, body); setSnap((s) => (s ? { ...s, comments: [c, ...s.comments] } : s)); setDraft(""); } catch { /* ignore */ }
+    setBusy(false);
+  }
+  return (
+    <div className="social">
+      <div className="social-actions">
+        <button className={"like-btn" + (snap?.liked ? " on" : "")} onClick={like} disabled={!snap}>{snap?.liked ? "♥" : "♡"} {snap?.likeCount ?? clip.likeCount ?? 0}</button>
+        <span className="muted" style={{ fontSize: 13 }}>👁 {snap?.views ?? clip.views ?? 0} views</span>
+        <span className="muted" style={{ fontSize: 13 }}>💬 {snap?.comments.length ?? clip.commentCount ?? 0}</span>
+      </div>
+      <div className="comment-input">
+        <Avatar user={me} size={30} />
+        <input className="input" placeholder="Add a comment…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && comment()} />
+        <button className="btn btn-sm" onClick={comment} disabled={busy || !draft.trim()}>Post</button>
+      </div>
+      <div className="comment-list">
+        {snap?.comments.map((c) => (
+          <div key={c.id} className="comment">
+            <div className="a" style={{ fontSize: 18 }}>{c.user.avatar}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5 }}><b>{c.user.name}</b> <span className="muted">@{c.user.handle} · {timeAgo(c.createdAt)}</span></div>
+              <div style={{ fontSize: 13.5, wordBreak: "break-word" }}>{c.body}</div>
+            </div>
+          </div>
+        ))}
+        {snap && !snap.comments.length && <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>No comments yet — be the first.</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Real-time live chat panel (poll every 2s). Used by the host + live viewers. */
+function LiveChat({ clipId, me }: { clipId: string; me: DemoUser }) {
+  const [msgs, setMsgs] = useState<SocialComment[]>([]);
+  const [draft, setDraft] = useState("");
+  const since = useRef(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let on = true;
+    const tick = async () => {
+      const fresh = await fetchLiveChat(clipId, since.current);
+      if (!on || !fresh.length) return;
+      since.current = Math.max(since.current, ...fresh.map((m) => m.createdAt));
+      setMsgs((prev) => [...prev, ...fresh].slice(-200));
+    };
+    tick(); const id = setInterval(tick, 2000); return () => { on = false; clearInterval(id); };
+  }, [clipId]);
+  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [msgs]);
+  async function send() {
+    const body = draft.trim(); if (!body) return; setDraft("");
+    try { const m = await postLiveChat(clipId, me.id, body); since.current = Math.max(since.current, m.createdAt); setMsgs((p) => [...p, m].slice(-200)); } catch { /* ignore */ }
+  }
+  return (
+    <div className="livechat">
+      <div className="livechat-head">💬 Live chat</div>
+      <div className="livechat-list" ref={listRef}>
+        {msgs.map((m) => (
+          <div key={m.id} className="chat-msg"><span className="chat-user">{m.user.avatar} {m.user.name}:</span> {m.body}</div>
+        ))}
+        {!msgs.length && <div className="muted" style={{ fontSize: 12.5, padding: 6 }}>Say hi 👋</div>}
+      </div>
+      <div className="livechat-input">
+        <input className="input" placeholder="Chat…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
+        <button className="btn btn-sm" onClick={send} disabled={!draft.trim()}>Send</button>
+      </div>
+    </div>
+  );
+}
+
 const LOW_CAP = 0.012;
 function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, onTopup }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void; balance: number | null; onTopup: () => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing">("idle");
@@ -472,6 +587,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const collab = clip.recipients.length > 1;
 
   useEffect(() => () => { handle.current?.stop().catch(() => {}); }, []);
+  useEffect(() => { void viewClip(clip.id); }, [clip.id]); // count a view when the page opens
   useEffect(() => {
     const onFullScreenChange = () => { if (!document.fullscreenElement) setFullscreen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
@@ -570,6 +686,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             <div><b className={onProfile ? "chan-link" : undefined} onClick={() => onProfile?.(clip.ownerId)}>@{clip.creator}</b><div className="muted" style={{ fontSize: 12.5 }}>{clip.tags.map((t) => "#" + t).join(" ")}</div></div>
           </div>
           {collab && <div className="receipt" style={{ marginTop: 12 }}>Revenue split: {clip.recipients.map((r, i) => <span key={i}>{i ? " · " : ""}<b>{r.label}</b> {r.percentage}%</span>)}</div>}
+          {clip.live ? <div style={{ marginTop: 14 }}><LiveChat clipId={clip.id} me={me} /></div> : <SocialBar clip={clip} me={me} />}
         </div>
 
         {/* payment panel */}

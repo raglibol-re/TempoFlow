@@ -87,6 +87,24 @@ for (const col of ["stripeCustomerId TEXT", "internalWalletId TEXT", "tempoWalle
 }
 // `live` flag on pre-existing clip tables.
 try { db.exec(`ALTER TABLE clips ADD COLUMN live INTEGER DEFAULT 0`); } catch { /* already present */ }
+// View counter on clips (total views, incremented when a watch session starts).
+try { db.exec(`ALTER TABLE clips ADD COLUMN views INTEGER DEFAULT 0`); } catch { /* already present */ }
+
+// ── Social layer: likes, comments, live chat (regular streaming-service features) ─
+db.exec(`
+  CREATE TABLE IF NOT EXISTS clip_likes (
+    clipId TEXT, userId TEXT, createdAt INTEGER,
+    PRIMARY KEY (clipId, userId)
+  );
+  CREATE TABLE IF NOT EXISTS clip_comments (
+    id TEXT PRIMARY KEY, clipId TEXT, userId TEXT, body TEXT, createdAt INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_comments_clip ON clip_comments(clipId);
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY, clipId TEXT, userId TEXT, body TEXT, createdAt INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_clip ON chat_messages(clipId, createdAt);
+`);
 
 export interface DbUser {
   id: string;
@@ -264,16 +282,22 @@ function rowToClip(r: any): ClipRow {
     pricePerSec: r.pricePerSec, recipients: JSON.parse(r.recipients || "[]"),
     hasVideo: !!r.hasVideo, videoPath: r.videoPath || undefined, thumb: r.thumb || undefined,
     live: !!r.live,
+    views: r.views ?? 0, likeCount: r.likeCount ?? 0, commentCount: r.commentCount ?? 0,
   };
 }
+// Clip rows enriched with social counts (likes/comments) via correlated subqueries.
+const CLIP_SELECT = `SELECT c.*,
+  (SELECT COUNT(*) FROM clip_likes l WHERE l.clipId = c.id) AS likeCount,
+  (SELECT COUNT(*) FROM clip_comments k WHERE k.clipId = c.id) AS commentCount
+  FROM clips c`;
 export function clipsCount(): number {
   return (db.prepare("SELECT COUNT(*) n FROM clips").get() as any).n as number;
 }
 export function clipsAll(): ClipRow[] {
-  return (db.prepare("SELECT * FROM clips ORDER BY createdAt DESC").all() as any[]).map(rowToClip);
+  return (db.prepare(`${CLIP_SELECT} ORDER BY c.createdAt DESC`).all() as any[]).map(rowToClip);
 }
 export function clipById(id: string): ClipRow | undefined {
-  const r = db.prepare("SELECT * FROM clips WHERE id=?").get(id);
+  const r = db.prepare(`${CLIP_SELECT} WHERE c.id = ?`).get(id);
   return r ? rowToClip(r) : undefined;
 }
 export function clipInsert(c: ClipRow & { createdAt?: number }) {
@@ -304,8 +328,61 @@ export function clipUpdateMeta(id: string, title: string, tags: string[]) {
 export function clipDelete(id: string): string | undefined {
   const r = db.prepare("SELECT videoPath FROM clips WHERE id=?").get(id) as any;
   db.prepare("DELETE FROM clips WHERE id=?").run(id);
+  db.prepare("DELETE FROM clip_likes WHERE clipId=?").run(id);
+  db.prepare("DELETE FROM clip_comments WHERE clipId=?").run(id);
+  db.prepare("DELETE FROM chat_messages WHERE clipId=?").run(id);
   return r?.videoPath || undefined;
 }
+
+// ── Social: likes, comments, live chat ───────────────────────────────────────
+export interface SocialUser { id: string; name: string; handle: string; avatar: string }
+export interface CommentRow { id: string; clipId: string; userId: string; body: string; createdAt: number; user: SocialUser }
+const socialUid = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`);
+function socialUser(userId: string): SocialUser {
+  const u = db.prepare("SELECT id,name,handle,avatar FROM users WHERE id=?").get(userId) as any;
+  return u ? { id: u.id, name: u.name, handle: u.handle, avatar: u.avatar } : { id: userId, name: "user", handle: "user", avatar: "🪪" };
+}
+const mapSocialRow = (r: any): CommentRow => ({
+  id: r.id, clipId: r.clipId, userId: r.userId, body: r.body, createdAt: r.createdAt,
+  user: { id: r.userId, name: r.name || "user", handle: r.handle || "user", avatar: r.avatar || "🪪" },
+});
+
+/** Toggle a like for (clipId, userId). Returns the new state + total count. */
+export function clipLikeToggle(clipId: string, userId: string): { liked: boolean; count: number } {
+  const has = db.prepare("SELECT 1 FROM clip_likes WHERE clipId=? AND userId=?").get(clipId, userId);
+  if (has) db.prepare("DELETE FROM clip_likes WHERE clipId=? AND userId=?").run(clipId, userId);
+  else db.prepare("INSERT OR IGNORE INTO clip_likes (clipId,userId,createdAt) VALUES (?,?,?)").run(clipId, userId, Date.now());
+  return { liked: !has, count: clipLikeCount(clipId) };
+}
+export const clipLikeCount = (clipId: string): number =>
+  (db.prepare("SELECT COUNT(*) n FROM clip_likes WHERE clipId=?").get(clipId) as any).n as number;
+export const clipLikedBy = (clipId: string, userId?: string): boolean =>
+  !!userId && !!db.prepare("SELECT 1 FROM clip_likes WHERE clipId=? AND userId=?").get(clipId, userId);
+
+export function commentInsert(clipId: string, userId: string, body: string): CommentRow {
+  const id = socialUid();
+  db.prepare("INSERT INTO clip_comments (id,clipId,userId,body,createdAt) VALUES (?,?,?,?,?)").run(id, clipId, userId, body, Date.now());
+  return { id, clipId, userId, body, createdAt: Date.now(), user: socialUser(userId) };
+}
+export const commentsForClip = (clipId: string): CommentRow[] =>
+  (db.prepare(`SELECT c.id,c.clipId,c.userId,c.body,c.createdAt,u.name,u.handle,u.avatar
+    FROM clip_comments c LEFT JOIN users u ON u.id=c.userId WHERE c.clipId=? ORDER BY c.createdAt DESC LIMIT 300`).all(clipId) as any[]).map(mapSocialRow);
+
+export function chatInsert(clipId: string, userId: string, body: string): CommentRow {
+  const id = socialUid();
+  db.prepare("INSERT INTO chat_messages (id,clipId,userId,body,createdAt) VALUES (?,?,?,?,?)").run(id, clipId, userId, body, Date.now());
+  return { id, clipId, userId, body, createdAt: Date.now(), user: socialUser(userId) };
+}
+export const chatForClip = (clipId: string, sinceTs = 0, limit = 200): CommentRow[] =>
+  (db.prepare(`SELECT c.id,c.clipId,c.userId,c.body,c.createdAt,u.name,u.handle,u.avatar
+    FROM chat_messages c LEFT JOIN users u ON u.id=c.userId WHERE c.clipId=? AND c.createdAt>? ORDER BY c.createdAt ASC LIMIT ?`).all(clipId, sinceTs, limit) as any[]).map(mapSocialRow);
+
+export function clipIncViews(clipId: string): number {
+  db.prepare("UPDATE clips SET views=COALESCE(views,0)+1 WHERE id=?").run(clipId);
+  return clipViews(clipId);
+}
+export const clipViews = (clipId: string): number =>
+  ((db.prepare("SELECT views FROM clips WHERE id=?").get(clipId) as any)?.views ?? 0) as number;
 
 // ── Campaigns (ads) ──────────────────────────────────────────────────────────
 export type CampaignRow = Campaign & { videoPath?: string };

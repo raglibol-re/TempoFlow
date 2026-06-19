@@ -32,6 +32,20 @@ export interface Clip {
   /** True if this is a LIVE stream (loops a source; viewers pay per second and a
    *  shared real-time audience/applause meter aggregates across all of them). */
   live?: boolean;
+  // ── social counts (API-computed) ──
+  views?: number; // total views (incremented when a watch session starts)
+  likeCount?: number; // total likes
+  commentCount?: number; // total comments
+}
+
+/** A comment on a clip, or a live-chat message in a livestream. */
+export interface SocialComment {
+  id: string;
+  clipId: string;
+  userId: string;
+  body: string;
+  createdAt: number;
+  user: { id: string; name: string; handle: string; avatar: string };
 }
 
 /** Live-stream aggregate stats (across all concurrent viewers of a live clip). */

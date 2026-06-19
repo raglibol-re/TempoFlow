@@ -49,6 +49,8 @@ import {
   goalInsert, goalById, goalsByCreator, goalSetStatus,
   pledgeInsert, pledgesForGoal, pledgeSetStatus, goalPledgedUsd, goalBackerCount, viewerPledgedUsd,
   campaignAddEscrow, campaignStop,
+  clipLikeToggle, clipLikeCount, clipLikedBy, commentInsert, commentsForClip,
+  chatInsert, chatForClip, clipIncViews, clipViews,
   type GoalRow,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
@@ -288,8 +290,17 @@ app.post("/users", async (c) => {
   const generated = providedAddress ? undefined : createWallet();
   const address = providedAddress || generated!.address;
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return c.json({ error: "bad address" }, 400);
+  // Idempotent login: the same wallet address ALWAYS maps to the same account, so
+  // logging back in with your private key returns your original account (clips,
+  // profile, balance) instead of creating a duplicate.
+  const existing = users.find((u) => u.address.toLowerCase() === address.toLowerCase());
+  if (existing) return c.json({ user: publicUser(existing) });
   const role = ["viewer", "creator", "advertiser", "admin"].includes(b?.role) ? b.role : "creator";
-  const id = b?.handle ? `me-${String(b.handle).toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32)}` : `me-${address.slice(2, 10).toLowerCase()}`;
+  // Derive a UNIQUE id from the handle so a duplicate handle never overwrites another
+  // person's account (everyone can create their own user).
+  const base = b?.handle ? `me-${String(b.handle).toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32)}` : `me-${address.slice(2, 10).toLowerCase()}`;
+  let id = base, n = 1;
+  while (users.some((u) => u.id === id)) id = `${base}-${++n}`;
   // Store the key whenever a valid one is provided (enables wallet-funded ad payouts).
   const key = (typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : (generated?.privateKey ?? "");
   const user = {
@@ -489,6 +500,64 @@ app.post("/clips/:id/delete", async (c) => {
     try { unlinkSync(join(uploadsDir, videoPath)); } catch { /* file already gone */ }
   }
   return c.json({ ok: true, id });
+});
+
+// ── Social: likes, comments, views, live chat (regular streaming features) ───
+/** Count a view (called once when a watch session starts). */
+app.post("/clips/:id/view", (c) => {
+  const id = c.req.param("id");
+  if (!getClip(id)) return c.json({ error: "clip not found" }, 404);
+  return c.json({ views: clipIncViews(id) });
+});
+/** Toggle the requesting user's like on a clip. */
+app.post("/clips/:id/like", async (c) => {
+  const id = c.req.param("id");
+  if (!getClip(id)) return c.json({ error: "clip not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  const user = getUser(String(b?.as ?? ""));
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  return c.json(clipLikeToggle(id, user.id));
+});
+/** Social snapshot for a clip's watch page: views, likes, whether the viewer liked
+ *  it, and the comment thread. */
+app.get("/clips/:id/social", (c) => {
+  const id = c.req.param("id");
+  if (!getClip(id)) return c.json({ error: "clip not found" }, 404);
+  const viewer = c.req.query("viewer");
+  return c.json({
+    views: clipViews(id),
+    likeCount: clipLikeCount(id),
+    liked: clipLikedBy(id, viewer),
+    comments: commentsForClip(id),
+  });
+});
+/** Post a comment on a clip. */
+app.post("/clips/:id/comments", async (c) => {
+  const id = c.req.param("id");
+  if (!getClip(id)) return c.json({ error: "clip not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  const user = getUser(String(b?.as ?? ""));
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  const body = String(b?.body ?? "").trim().slice(0, 600);
+  if (!body) return c.json({ error: "empty comment" }, 400);
+  return c.json({ comment: commentInsert(id, user.id, body) });
+});
+/** Live chat: fetch messages since a timestamp (poll), and post a message. */
+app.get("/live/:id/chat", (c) => {
+  const id = c.req.param("id");
+  const since = Number(c.req.query("since") ?? 0) || 0;
+  return c.json({ messages: chatForClip(id, since) });
+});
+app.post("/live/:id/chat", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  if (!clip) return c.json({ error: "stream not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  const user = getUser(String(b?.as ?? ""));
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  const body = String(b?.body ?? "").trim().slice(0, 300);
+  if (!body) return c.json({ error: "empty message" }, 400);
+  return c.json({ message: chatInsert(id, user.id, body) });
 });
 
 // ── Serve uploaded video (HTTP range support for <video>) — clips AND ads ────
