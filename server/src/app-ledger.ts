@@ -91,9 +91,18 @@ export function creditDemoFunds(userId: string, amount: number): { balance: numb
   return { balance: getAppBalance(userId) };
 }
 
-export async function chargeForStreamingSeconds(userId: string, seconds: number, opts: { clipId: string; pricePerSecond: number; creatorId?: string; mppTransactionId?: string }) {
+export async function chargeForStreamingSeconds(userId: string, seconds: number, opts: {
+  clipId: string;
+  pricePerSecond?: number;
+  amount?: number;
+  creatorId?: string;
+  mppTransactionId?: string;
+  startSecond?: number;
+  endSecond?: number;
+  pricedSeconds?: unknown[];
+}) {
   const safeSeconds = Math.max(0, Math.floor(seconds));
-  const amount = +(safeSeconds * opts.pricePerSecond).toFixed(6);
+  const amount = +(opts.amount ?? (safeSeconds * (opts.pricePerSecond ?? 0))).toFixed(6);
   if (safeSeconds <= 0 || amount <= 0) return { ok: true, amount: 0, balance: getAppBalance(userId) };
   const balance = getAppBalance(userId);
   if (balance + 1e-9 < amount) return { ok: false, reason: "insufficient_balance", balance, amount };
@@ -107,7 +116,16 @@ export async function chargeForStreamingSeconds(userId: string, seconds: number,
     direction: "debit",
     status: "confirmed",
     mppTransactionId: opts.mppTransactionId,
-    metadata: { clipId: opts.clipId, seconds: safeSeconds, pricePerSecond: opts.pricePerSecond, creatorId: opts.creatorId },
+    metadata: {
+      clipId: opts.clipId,
+      seconds: safeSeconds,
+      pricePerSecond: opts.pricePerSecond,
+      amount,
+      creatorId: opts.creatorId,
+      startSecond: opts.startSecond,
+      endSecond: opts.endSecond,
+      pricedSeconds: opts.pricedSeconds,
+    },
     createdAt: now,
     confirmedAt: now,
   };

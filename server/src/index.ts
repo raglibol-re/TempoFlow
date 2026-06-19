@@ -42,6 +42,7 @@ import {
 import * as ledger from "./ledger.js";
 import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot, appCredit, appDebit } from "./app-ledger.js";
 import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, syncCheckoutSession } from "./stripe.js";
+import { confirmWatchRange, quoteWatchRange } from "./dynamic-pricing.js";
 import {
   userInsert, userUpdateProfile, type CampaignRow,
   followInsert, followRemove, isFollowing, followersOf, followingOf,
@@ -752,11 +753,11 @@ app.get("/api/watch/:id", async (c) => {
   if (!viewer) return c.json({ error: "unauthorized" }, 401);
   const origin = c.req.header("origin") ?? "*";
   stopRequested.delete(`app:${clip.id}:${viewer.id}`);
-  const pricePerSec = Number(clip.pricePerSec);
   const encoder = new TextEncoder();
   const body = new ReadableStream({
     async start(controller) {
       try {
+        let spentUsd = 0;
         for (let second = 1; second <= clip.durationSec; second++) {
           if (stopRequested.has(`app:${clip.id}:${viewer.id}`) || stopRequested.has(clip.id)) {
             stopRequested.delete(`app:${clip.id}:${viewer.id}`);
@@ -765,19 +766,30 @@ app.get("/api/watch/:id", async (c) => {
             return;
           }
           const isOwner = viewer.id === clip.ownerId; // creators preview their own clips/streams free
+          const startSecond = second - 1;
+          const quote = quoteWatchRange(clip.id, startSecond, startSecond + 1, undefined, clip.durationSec);
           if (!isOwner) {
-            const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
+            const charged = await chargeForStreamingSeconds(viewer.id, quote.seconds, {
+              clipId: clip.id,
+              amount: quote.total,
+              creatorId: clip.ownerId,
+              startSecond: quote.startSecond,
+              endSecond: quote.endSecond,
+              pricedSeconds: quote.pricedSeconds,
+            });
             if (!charged.ok) {
               controller.enqueue(encoder.encode(JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance }) + "\n"));
               controller.close();
               return;
             }
-            appCredit(clip.ownerId, pricePerSec, "watch_earning", { clipId: clip.id, viewerId: viewer.id }); // creator earns
-            ledger.record({ fromAddr: viewer.address, toAddr: clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
-            if (clip.live) live.liveAddPaid(clip.id, pricePerSec);
+            confirmWatchRange(clip.id, quote.startSecond, quote.endSecond, clip.durationSec);
+            spentUsd = +(spentUsd + quote.total).toFixed(6);
+            appCredit(clip.ownerId, quote.total, "watch_earning", { clipId: clip.id, viewerId: viewer.id, startSecond: quote.startSecond, endSecond: quote.endSecond }); // creator earns
+            ledger.record({ fromAddr: viewer.address, toAddr: clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount: quote.total, contentId: clip.id });
+            if (clip.live) live.liveAddPaid(clip.id, quote.total);
           }
           if (clip.live && !isOwner) live.liveBeat(clip.id, viewer.id); // count paying viewers in the shared meter
-          controller.enqueue(encoder.encode(JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator }) + "\n"));
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "tick", clipId: clip.id, second, priceUsd: isOwner ? 0 : quote.total, spentUsd, creator: clip.creator }) + "\n"));
           await sleep(1000);
         }
         controller.close();
@@ -820,10 +832,10 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
   const fromAddr = viewer?.address ?? "0xviewer";
   const fromLabel = viewer?.name ?? "viewer";
   stopRequested.delete(clip.id);
-  const pricePerSec = Number(clip.pricePerSec);
   return corsify(
     origin,
     result.withReceipt(async function* (stream) {
+      let spentUsd = 0;
       for (let second = 1; second <= clip.durationSec; second++) {
         if (stopRequested.has(clip.id)) {
           stopRequested.delete(clip.id);
@@ -832,10 +844,14 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
         // A LIVE stream only pays while the creator is present. If they've left
         // (host beats lapsed), the stream has ended — stop charging the viewer.
         if (clip.live && !live.hostPresent(clip.id)) return;
+        const startSecond = second - 1;
+        const quote = quoteWatchRange(clip.id, startSecond, startSecond + 1, undefined, clip.durationSec);
         await stream.charge(); // REAL on-chain pathUSD: viewer's channel → creator (operator-settled, refunded on close)
-        ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
-        if (clip.live) { live.liveBeat(clip.id, viewer?.id ?? fromLabel); live.liveAddPaid(clip.id, pricePerSec); }
-        yield JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator });
+        confirmWatchRange(clip.id, quote.startSecond, quote.endSecond, clip.durationSec);
+        spentUsd = +(spentUsd + quote.total).toFixed(6);
+        ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: quote.total, contentId: clip.id });
+        if (clip.live) { live.liveBeat(clip.id, viewer?.id ?? fromLabel); live.liveAddPaid(clip.id, quote.total); }
+        yield JSON.stringify({ type: "tick", clipId: clip.id, second, priceUsd: quote.total, spentUsd, creator: clip.creator });
         await sleep(1000);
       }
     }),
