@@ -128,43 +128,55 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
   }
 
   return (
-    <div className="login">
-      {Hero}
-      <div className="muted" style={{ textAlign: "center", marginTop: 6 }}>Pay per second, earn from ads, and top up with Stripe.</div>
-
-      <div className="login-card">
-        <h3 style={{ marginTop: 0 }}>Create your account</h3>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>We create a real Tempo wallet for you. You’ll get a private key to save — that key is how you log back in later.</div>
-        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input className="input" placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <input className="input" placeholder="handle" value={handle} onChange={(e) => setHandle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createAccount()} />
-          <button className="btn" onClick={createAccount} disabled={busy || !name.trim() || !handle.trim()}>{busy ? "creating…" : "Create account"}</button>
+    <div className="login-page">
+      <section className="login-aside">
+        <div className="brand login-brand"><BrandMark size={34} />Tempo<b>Flow</b></div>
+        <div className="login-eyebrow">Streaming commerce platform</div>
+        <h1>Sign in to manage real-time creator payments.</h1>
+        <p>Watch videos by the second, fund ad campaigns, and track app credit from one account.</p>
+        <div className="login-metrics" aria-label="Platform capabilities">
+          <div><b>1s</b><span>metered billing</span></div>
+          <div><b>Stripe</b><span>card top-ups</span></div>
+          <div><b>Ledger</b><span>auditable balance</span></div>
         </div>
-      </div>
+      </section>
 
-      <div className="login-card">
-        <h3 style={{ marginTop: 0 }}>Returning? Log in with your key</h3>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste the private key you saved when you created your account — it brings back your channel, balance, and history.</div>
-        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input className="input" type="password" placeholder="0x… your private key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} />
-          <button className="btn btn-ghost" onClick={connect} disabled={busy || !key.trim()}>{busy ? "logging in…" : "Log in with key"}</button>
+      <main className="login-panel">
+        <div className="login-panel-head">
+          <h2>Create account</h2>
+          <p>We create a Tempo testnet wallet for you. Save the private key after account creation; it is how you return later.</p>
         </div>
-      </div>
+        <div className="login-form">
+          <label className="fld">Display name<input className="input" placeholder="Jane Doe" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></label>
+          <label className="fld">Handle<input className="input" placeholder="jane.doe" value={handle} onChange={(e) => setHandle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createAccount()} /></label>
+          <button className="btn login-primary" onClick={createAccount} disabled={busy || !name.trim() || !handle.trim()}>{busy ? "Creating account…" : "Continue"}</button>
+        </div>
 
-      <details className="login-card">
-        <summary>Or try a demo account</summary>
-        <div style={{ marginTop: 10 }}>
+        <div className="returning-login">
+          <div className="login-panel-head compact">
+            <h2>Returning user</h2>
+            <p>Paste the private key you saved to restore your channel, balance, and history.</p>
+          </div>
+          <div className="login-form compact">
+            <input className="input" type="password" placeholder="0x… your private key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} />
+            <button className="btn btn-ghost login-primary" onClick={connect} disabled={busy || !key.trim()}>{busy ? "Logging in…" : "Log in with key"}</button>
+          </div>
+        </div>
+
+        <div className="login-separator"><span>or continue with a demo profile</span></div>
+        <div className="demo-directory">
           {["viewer", "creator", "advertiser"].map((r) => {
             const us = demo.filter((u) => u.role === r); if (!us.length) return null;
             return (
-              <div key={r} style={{ marginBottom: 10 }}>
-                <div className="role-chip" style={{ marginBottom: 6 }}>{ROLES[r]}</div>
+              <div key={r} className="demo-group">
+                <div className="role-chip">{ROLES[r]}</div>
                 <div className="login-grid">
                   {us.map((u) => (
                     <button key={u.id} className="login-acct" onClick={() => onLogin(u)}>
-                      <span style={{ fontSize: 18 }}>{u.avatar}</span>
-                      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                        <b style={{ fontSize: 13 }}>{u.name}</b><span className="muted" style={{ fontSize: 11 }}>@{u.handle}</span>
+                      <span className="login-acct-avatar">{u.avatar}</span>
+                      <span className="login-acct-copy">
+                        <b>{u.name}</b>
+                        <small>@{u.handle}</small>
                       </span>
                     </button>
                   ))}
@@ -173,8 +185,8 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
             );
           })}
         </div>
-      </details>
-      <div className="login-foot">Your testnet key is your login — save it. Export it anytime in Settings.</div>
+        <div className="login-foot">Your testnet key is your login. Save it once, export it anytime in Settings.</div>
+      </main>
     </div>
   );
 }
@@ -186,40 +198,79 @@ function BackendSetup({ error }: { error?: string | null }) {
     try { saveServerUrl(url); } catch (e: any) { setLocalError(e?.message ?? String(e)); }
   }
   return (
-    <div className="login backend-setup">
-      <div className="login-hero">
-        <SparklesCore
-          background="transparent"
-          minSize={0.6}
-          maxSize={1.6}
-          particleDensity={140}
-          speed={1.2}
-          particleColor="#9147ff"
-          className="login-hero-sparkles"
-        />
-        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><BrandMark size={40} />Tempo<b>Flow</b></div>
-        <div className="login-hero-mask" />
-      </div>
-      <div className="login-card">
-        <h3 style={{ marginTop: 0 }}>Backend needed</h3>
-        <div className="muted" style={{ marginBottom: 12 }}>
-          This Vercel site is the frontend. It needs a reachable backend URL to load profiles, videos, payments, and ads.
+    <div className="backend-page">
+      <SparklesCore
+        background="transparent"
+        minSize={0.5}
+        maxSize={1.3}
+        particleDensity={90}
+        speed={0.8}
+        particleColor="#9147ff"
+        className="backend-sparkles"
+      />
+      <div className="backend-shell">
+        <div className="backend-copy">
+          <div className="brand backend-brand"><BrandMark size={36} />Tempo<b>Flow</b></div>
+          <div className="backend-kicker">pay-per-second streaming</div>
+          <h1>Connect the live backend to open the platform.</h1>
+          <p>
+            The web app is deployed. It just needs the server URL that provides
+            profiles, videos, Stripe top-ups, and real-time rewards.
+          </p>
+          <div className="backend-pills">
+            <span>App credit</span>
+            <span>Creator payouts</span>
+            <span>Ad rewards</span>
+          </div>
         </div>
-        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input
-            className="input"
-            placeholder="https://your-flow-backend.example.com"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && save()}
-            autoFocus
-          />
-          <button className="btn" onClick={save} disabled={!url.trim()}>Use backend</button>
+
+        <div className="backend-card">
+          <div className="backend-card-head">
+            <div>
+              <div className="backend-card-title">Backend URL</div>
+              <div className="backend-card-sub">Paste your HTTPS tunnel or hosted server.</div>
+            </div>
+            <span className="backend-status">not connected</span>
+          </div>
+          <div className="backend-form">
+            <input
+              className="input backend-input"
+              placeholder="https://your-backend.trycloudflare.com"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+              autoFocus
+            />
+            <button className="btn backend-submit" onClick={save} disabled={!url.trim()}>Connect</button>
+          </div>
+          {(localError || error) && <div className="toast-err backend-error">{localError || error}</div>}
+          <div className="backend-steps">
+            <div><b>1</b><span>Run <code>pnpm dev</code> locally.</span></div>
+            <div><b>2</b><span>Run <code>pnpm tunnel</code> in another terminal.</span></div>
+            <div><b>3</b><span>Paste the printed HTTPS URL here.</span></div>
+          </div>
         </div>
-        <div className="receipt" style={{ marginTop: 14 }}>
-          Quick demo: run the backend locally, expose it with <code>pnpm public</code>, then paste the printed HTTPS tunnel URL here.
+
+        <div className="backend-preview" aria-hidden="true">
+          <div className="preview-top">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="preview-hero">
+            <div className="preview-video" />
+            <div className="preview-panel">
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+          <div className="preview-grid">
+            <i />
+            <i />
+            <i />
+          </div>
         </div>
-        {(localError || error) && <div className="toast-err" style={{ marginTop: 12 }}>{localError || error}</div>}
       </div>
     </div>
   );
