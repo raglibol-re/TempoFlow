@@ -1,8 +1,8 @@
 /**
  * TempoFlow — pay-per-second streaming (Twitch/YouTube/DAZN-style).
  * Watch creators (money out/sec), earn from ads (money in/sec), upload videos,
- * run campaigns, manage your profile. Payments are shown as app credit; Stripe
- * top-ups and Tempo settlement stay on the server.
+ * run campaigns, manage your profile. Payments are shown as app credit; faucet
+ * funding and Tempo settlement stay on the server.
  */
 import "./tailwind.css";
 import "./styles.css";
@@ -15,7 +15,7 @@ import { PLATFORM_FEE } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
-  videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
+  videoSrc, connectTempoAccount, registerAppAccount, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   sendTip, runAuction, matchAd, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
@@ -138,7 +138,7 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
         <p>Watch videos by the second, fund ad campaigns, and track app credit from one account.</p>
         <div className="login-metrics" aria-label="Platform capabilities">
           <div><b>1s</b><span>metered billing</span></div>
-          <div><b>Stripe</b><span>card top-ups</span></div>
+          <div><b>Testnet</b><span>demo funds</span></div>
           <div><b>Ledger</b><span>auditable balance</span></div>
         </div>
       </section>
@@ -217,7 +217,7 @@ function BackendSetup({ error }: { error?: string | null }) {
           <h1>Connect the live backend to open the platform.</h1>
           <p>
             The web app is deployed. It just needs the server URL that provides
-            profiles, videos, Stripe top-ups, and real-time rewards.
+            profiles, videos, test funds, and real-time rewards.
           </p>
           <div className="backend-pills">
             <span>App credit</span>
@@ -1484,7 +1484,7 @@ function AccountMenu({ me, balance, onProfile, onTopup, onLogout }: { me: DemoUs
             <a className="acct-item" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer">🔎 View wallet on Tempo explorer ↗</a>
             <a className="acct-item" href={tempoAppUrl} target="_blank" rel="noreferrer">⚡ Open the Tempo app ↗</a>
             <button className="acct-item" onClick={() => { setOpen(false); onProfile(); }}>👤 View profile</button>
-            <button className="acct-item" onClick={() => { setOpen(false); onTopup(); }}>＋ Add funds (card → pathUSD)</button>
+            <button className="acct-item" onClick={() => { setOpen(false); onTopup(); }}>＋ Add test funds</button>
             <div className="acct-sep" />
             <button className="acct-item" onClick={revealKey} disabled={loadingKey}>{loadingKey ? "…" : revealed ? "🙈 Hide private key" : "🔑 Export private key"}</button>
             {keyErr && <div className="muted" style={{ fontSize: 11, color: "var(--out)", padding: "0 12px 6px" }}>{keyErr}</div>}
@@ -1594,32 +1594,33 @@ function GlobalSearch({
   );
 }
 
-function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => void; onError: (e: string) => void }) {
+function TopupModal({ me, onClose, onError, onFunded }: { me: DemoUser; onClose: () => void; onError: (e: string) => void; onFunded: (message: string) => void }) {
   const [amount, setAmount] = useState(10);
   const [busy, setBusy] = useState(false);
-  async function checkout() {
+  async function addTestFunds() {
     setBusy(true);
     try {
-      const session = await createTopupCheckoutSession(me.id, amount);
-      if (!session.url) throw new Error("Stripe did not return a checkout URL");
-      window.location.href = session.url;
+      const rounds = Math.max(1, Math.round(amount / 5));
+      for (let i = 0; i < rounds; i++) await fundUser(me.id);
+      onFunded(`✓ Added ${usd(rounds * 5)} test funds. No real card payment was made.`);
+      onClose();
     } catch (e: any) {
       onError(e?.message ?? String(e));
-      setBusy(false);
     }
+    setBusy(false);
   }
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Add credit · card → pathUSD</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
-        <div className="muted" style={{ marginBottom: 12 }}>Pay with a card via Stripe — we instantly settle the same amount as real ◎ pathUSD on Tempo, ready to spend per-second on creators. Balance updates once Stripe confirms.</div>
+        <div className="modal-head"><h3>Add test funds</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
+        <div className="muted" style={{ marginBottom: 12 }}>Demo mode uses test funds instead of Stripe Checkout. This adds spendable app credit and best-effort testnet pathUSD, without charging real money.</div>
         <div className="topup-grid">
           {[5, 10, 25].map((v) => (
             <button key={v} className={"topup-choice" + (amount === v ? " on" : "")} onClick={() => setAmount(v)}>${v}</button>
           ))}
         </div>
-        <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={checkout} disabled={busy}>{busy ? "opening Stripe…" : `Continue to Stripe · $${amount}`}</button>
-        <div className="muted" style={{ marginTop: 10, fontSize: 11.5, textAlign: "center" }}>🌉 Stripe (fiat rails) → pathUSD on Tempo · testnet</div>
+        <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={addTestFunds} disabled={busy}>{busy ? "adding test funds…" : `Add ${usd(amount)} test funds`}</button>
+        <div className="muted" style={{ marginTop: 10, fontSize: 11.5, textAlign: "center" }}>Testnet only · no real card payment · no Stripe checkout</div>
       </div>
     </div>
   );
@@ -2002,7 +2003,7 @@ function App() {
       }
     } catch {}
     const payment = new URLSearchParams(window.location.search).get("payment");
-    if (payment === "success") setPaymentNotice("Payment received. Your balance will refresh after Stripe confirms it.");
+    if (payment === "success") setPaymentNotice("Payment received. Your balance will refresh after confirmation.");
     if (payment === "cancel") setPaymentNotice("Payment canceled. No credit was added.");
   }, []);
   function refreshFeed() { if (SERVER_CONFIGURED) fetchFeed().then(setFeed).catch((e) => setError(e.message)); }
@@ -2028,7 +2029,7 @@ function App() {
         setPaymentNotice("✓ Payment confirmed — settled as ◎ pathUSD on Tempo and added to your balance.");
         setBalance(await fetchBalance(me.id));
       })
-      .catch(() => setPaymentNotice("Payment received. Waiting for Stripe confirmation."));
+      .catch(() => setPaymentNotice("Payment received. Waiting for confirmation."));
   }, [me]);
 
   async function login(u: DemoUser) { const hu = await ensureKey(u); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); setMe(hu); setError(null); }
@@ -2151,14 +2152,18 @@ function App() {
           <span className="pill" title="your real on-chain pathUSD balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <a className="pill mono addr-pill" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`${me.address} — view your wallet on the Tempo explorer`} style={{ textDecoration: "none" }}>{shortAddr(me.address)} ↗</a>
-          <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Add funds</button>
+          <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Test funds</button>
           <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onTopup={() => setTopupOpen(true)} onLogout={logout} />
         </div>
       </div>
 
       {error && <div className="page" style={{ paddingBottom: 0 }}><div className="toast-err">⚠ {error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}
       {paymentNotice && <div className="page" style={{ paddingBottom: 0 }}><div className="receipt">{paymentNotice}<button className="btn-ghost btn btn-sm" onClick={() => setPaymentNotice(null)}>×</button></div></div>}
-      {topupOpen && <TopupModal me={me} onClose={() => setTopupOpen(false)} onError={setError} />}
+      {topupOpen && <TopupModal me={me} onClose={() => setTopupOpen(false)} onError={setError} onFunded={(message) => {
+        setPaymentNotice(message);
+        fetchBalance(me.id).then(setBalance).catch(() => {});
+        fetchNet(me.id).then(setNet).catch(() => {});
+      }} />}
 
       {view === "ledger"
         ? <TransparencyView me={me} onBack={() => go("home")} />
