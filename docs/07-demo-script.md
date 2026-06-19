@@ -28,8 +28,12 @@ when others watch it, they pay your wallet directly."
 **1:30–2:15 — Money IN (the reversal).**
 Go to **Earn**, tap **Watch ad**. "Now an advertiser — Tempo Pay — pays **me** per second, but
 only for *proven* attention." Green **+$** meter + green flow lane **← advertiser**. Tap
-**Look away 🙈**: payment pauses. **Look back 👀**: it resumes. (Under the hood the company's
-advertiser agent is paying you, gated by your heartbeats.)
+**Look away 🙈**: payment pauses. **Look back 👀**: it resumes. Then background the tab or
+scroll the ad off-screen — payment pauses there too. When the **"👀 tap to keep earning"**
+prompt pops up at a random spot, tap it: "that's the platform checking a human is actually
+watching — ignore it and the money stops." (Under the hood the company's advertiser agent
+is paying you, gated by a **three-layer attention proof** — visibility/on-screen signals, a
+random tap challenge, and session-bound heartbeats. See [01-architecture.md](01-architecture.md).)
 
 **2:15–2:40 — Net + autonomous agents.**
 Show the per-user **net**: "my ad attention more than paid for my creator watching." Then the

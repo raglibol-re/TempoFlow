@@ -134,6 +134,13 @@ select.input { appearance: none; }
 .vcard:hover .vthumb.ad { outline-color: #ff8094; }
 .player.ad { border: 3px solid var(--out); box-shadow: 0 0 26px rgba(255,93,115,.32); }
 .adtag { position: absolute; top: 8px; left: 8px; background: var(--out); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .5px; padding: 2px 8px; border-radius: 6px; box-shadow: 0 0 10px rgba(255,93,115,.6); z-index: 2; }
+/* Layer 2 attention challenge: a target that appears at a random spot on the ad.
+   Tap it within the answer window or earning pauses. */
+.att-challenge { position: absolute; transform: translate(-50%, -50%); z-index: 5; cursor: pointer; white-space: nowrap;
+  background: var(--in); color: #04190f; font-weight: 800; font-size: 13px; padding: 9px 14px; border: none; border-radius: 999px;
+  box-shadow: 0 0 0 6px rgba(43,217,160,.18), 0 6px 22px rgba(0,0,0,.45); animation: att-pulse 1s ease-in-out infinite; }
+.att-challenge:hover { filter: brightness(1.06); }
+@keyframes att-pulse { 0%,100% { box-shadow: 0 0 0 5px rgba(43,217,160,.16), 0 6px 22px rgba(0,0,0,.45); } 50% { box-shadow: 0 0 0 12px rgba(43,217,160,.05), 0 6px 22px rgba(0,0,0,.45); } }
 .badge.in-badge { background: rgba(43,217,160,.92); color: #04190f; }
 .vthumb .ov { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 10px; background: rgba(0,0,0,.62); font-weight: 600; color: #fff; }
 .adrow { display: flex; align-items: center; gap: 14px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); border-left: 3px solid var(--out); }
@@ -226,3 +233,8 @@ textarea.input { resize: vertical; font-family: inherit; }
 
 /* ---- Login footer ---- */
 .login-foot { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 18px; }
+
+
+/* ---- Watch-ad CTA ---- */
+.btn-lg { padding: 12px 22px; font-size: 16px; border-radius: 11px; }
+.ov-watch { display: flex; flex-direction: column; align-items: center; justify-content: center; }

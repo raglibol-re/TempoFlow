@@ -14,7 +14,9 @@ FLOW makes money flow per second and **visible**, in two directions:
 - **Watch a creator → money flows OUT**, you → creator, per second of watchtime. Scroll away,
   it stops and refunds instantly.
 - **Watch an ad → money flows IN**, advertiser → you, per second — but **only for proven
-  attention** (heartbeat-gated). No attention, no payment.
+  attention**: a three-layer proof (visibility/on-screen signals + a random tap challenge +
+  session-bound heartbeats) means you can't farm it by looking away or scripting. No
+  attention, no payment.
 
 **Net effect:** your ad-attention finances the creators you actually want to watch — a
 potentially self-sustaining feed. We proved it: autonomous agents ran the loop and the viewer

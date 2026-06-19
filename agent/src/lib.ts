@@ -148,14 +148,14 @@ export async function discoverOffers(): Promise<{ serviceInfo: any; offers: Offe
 }
 
 // ── sessionManager factory ──────────────────────────────────────────────────
-export function makeManager(key: `0x${string}`) {
+export function makeManager(key: `0x${string}`, maxDeposit = "0.5") {
   const account = privateKeyToAccount(key);
   const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
   const manager = sessionManager({
     account,
     client,
     decimals: TOKEN_DECIMALS,
-    maxDeposit: "0.5",
+    maxDeposit,
     escrow: ESCROW_CONTRACT,
   });
   return { account, manager };

@@ -57,12 +57,17 @@ sequenceDiagram
     A->>S: GET /attention/:campaignId (open session)
     S-->>A: 402 Challenge (price/sec, recipient=Viewer)
     A->>S: Session open + per-second vouchers
+    W->>S: POST /attention/session → session token (L3)
     loop while ad is shown
-        W->>S: heartbeat (tab visible, in viewport)
-        alt heartbeat valid
+        W->>S: heartbeat {token, visible, playing, onScreen}
+        S-->>W: {paused?, challenge?}  (may issue a random tap challenge, L2)
+        alt attention fresh (signals ok + token ok + challenge not overdue)
             S->>VW: settle to viewer wallet
-        else attention lost
+        else inattentive / unanswered challenge / bad token
             S--xA: pause — voucher NOT settled
+        end
+        opt challenge issued
+            W->>S: POST /attention/answer {token, challengeId}  → resume
         end
     end
     A->>S: ad ends → session.close()
@@ -70,10 +75,38 @@ sequenceDiagram
 
 ## The attention-proof gate (core of the honesty thesis)
 
-The server only accepts/settles advertiser vouchers **while valid viewer heartbeats
-exist** (tab visible + ad element in viewport, optionally interaction). No heartbeat →
-stream pauses → advertiser stops paying. **Nobody pays for ignored ads.** This is what
-makes "ads pay you" real instead of farmable.
+The server only accepts/settles advertiser vouchers **while the viewer's attention is
+provably fresh**. "Provably" is layered, because a naive heartbeat proves only that a
+timer is running — you could background the tab, mute the ad in a corner, or skip the
+browser entirely and `curl` the heartbeat in a loop. The proof
+([`server/src/attention.ts`](../server/src/attention.ts)) stacks three layers:
+
+- **Layer 1 — passive signals.** Each heartbeat carries `{visible, playing, onScreen}`
+  from the browser; a beat only counts while the tab is foregrounded
+  (`document.visibilityState`) and the player is in the viewport (`IntersectionObserver`).
+  Stops the honest background-tab / scrolled-away / manual-look-away cheats. (`playing`
+  is reported but **not gated on**: the ad `<video>` only starts once payment is flowing,
+  so requiring it would deadlock — and emoji-only ads have no `<video>` at all.)
+- **Layer 2 — active challenge.** At random 8–16s intervals the server issues a
+  `challenge` (an unpredictable token + a random on-screen `x,y`) in the heartbeat
+  response. The web app renders it as a tappable target; the viewer must echo the token
+  back via `POST /attention/answer` within a 6s grace window. Miss it → attention goes
+  stale → payment pauses until they tap. This is what actually forces a human to be
+  looking at the screen.
+- **Layer 3 — session binding.** Every heartbeat must carry the per-session token from
+  `POST /attention/session` (issued when the ad opens). A sessionless or stale-token beat
+  mints no attention, closing the scripted-`curl` hole.
+
+`isAttentionFresh(campaignId, viewer)` (the gate read by the `/attention` SSE loop) is
+true only when the last beat that passed **all three** layers is within `HEARTBEAT_TTL_MS`
+(2.5s). No fresh proof → stream pauses → advertiser stops paying. **Nobody pays for
+ignored ads.** This is what makes "ads pay you" real instead of farmable.
+
+> **Threat model:** this is demo-grade, not Sybil-proof. Layer 1 signals are
+> client-reported (a determined script could forge them), and Layer 2 could be defeated
+> by reimplementing the protocol. The goal is to make *casual* gaming impossible and
+> *scripted* gaming expensive. Hardening would mean server-rendered challenge content
+> (answer requires decoding pixels) or signed client attestation. See [ADR-010](06-decisions.md).
 
 ## Net balance & discovery
 
@@ -97,7 +130,8 @@ makes "ads pay you" real instead of farmable.
 - **Content** (`content.ts`): clips owned by creators, campaigns by companies; `POST /clips`
   and `POST /campaigns` let users create. **Ledger** (`ledger.ts`) is per-address.
 - **In-browser ads:** `POST /demo/run-ad` spawns the advertiser agent (separate process)
-  targeting the watching viewer, gated by heartbeats — so ads pay in one browser tab.
+  targeting the watching viewer, gated by the three-layer attention proof above — so ads
+  pay in one browser tab, and only while the viewer is provably watching.
 
 ## Persistence
 

@@ -23,7 +23,9 @@
 
 import { randomBytes } from "node:crypto";
 
-const HEARTBEAT_TTL_MS = 2500; // a "fresh" beat must be newer than this
+const HEARTBEAT_TTL_MS = 2500; // a "fresh" (attentive) beat must be newer than this
+const PRESENCE_TTL_MS = 20000; // viewer is "still here" if ANY beat arrived this recently
+                               // (look-away keeps beating; only truly leaving stops it)
 const ANSWER_MS = 6000; // grace window to respond to a challenge (still paid during it)
 const CHALLENGE_MIN_GAP_MS = 8000; // soonest the next challenge may appear
 const CHALLENGE_MAX_GAP_MS = 16000; // latest
@@ -43,6 +45,7 @@ interface Signals {
 
 interface Session {
   token: string;
+  lastBeat: number; // ms timestamp of the last VALID beat (present, even if looked away)
   lastGoodBeat: number; // ms timestamp of the last beat that passed L1+L3 and wasn't challenge-overdue
   challenge: (Challenge & { issuedAt: number }) | null;
   nextChallengeAt: number; // when the next challenge becomes due
@@ -62,6 +65,7 @@ export function openSession(campaignId: string, viewer: string): { token: string
   const token = newToken();
   sessions.set(key(campaignId, viewer), {
     token,
+    lastBeat: 0,
     lastGoodBeat: 0,
     challenge: null,
     nextChallengeAt: scheduleNext(now),
@@ -90,12 +94,21 @@ export function heartbeat(
   if (!s) return { ok: false, paused: true, reason: "no-session", challenge: null };
   if (!token || token !== s.token) return { ok: false, paused: true, reason: "bad-token", challenge: null };
 
+  // Presence: ANY valid beat means the viewer is still here (even looked-away beats
+  // carry visible:false). Keeps the channel open across look-aways so payment can
+  // resume instantly — we only tear the channel down once these stop entirely.
+  s.lastBeat = now;
+
   const pub = (c: Session["challenge"]): Challenge | null =>
     c ? { id: c.id, x: c.x, y: c.y, answerMs: c.answerMs } : null;
 
-  // L1: passive gate. Look-away / hidden tab / paused video → don't count, and
-  // don't run the challenge clock (no point quizzing someone who's away).
-  const attentive = signals.visible !== false && signals.playing !== false && signals.onScreen !== false;
+  // L1: passive gate. Hidden tab / scrolled-away player / manual look-away → don't
+  // count, and don't run the challenge clock (no point quizzing someone who's away).
+  // NOTE: we intentionally do NOT require `playing` here — the ad video only starts
+  // playing once payment is flowing, so gating payment on `playing` would deadlock
+  // (and emoji-only ads have no <video> at all). `visible` already folds in the
+  // manual look-away toggle from the client.
+  const attentive = signals.visible !== false && signals.onScreen !== false;
   if (!attentive) return { ok: true, paused: true, reason: "inattentive", challenge: pub(s.challenge) };
 
   // L2: challenge handling.
@@ -151,4 +164,18 @@ export function answer(
 export function isAttentionFresh(campaignId: string, viewer: string): boolean {
   const s = sessions.get(key(campaignId, viewer));
   return s != null && Date.now() - s.lastGoodBeat <= HEARTBEAT_TTL_MS;
+}
+
+/** Has the viewer truly LEFT (no beats at all for a while)? A look-away keeps
+ *  beating, so this stays false — the payment channel can stay open and resume.
+ *  Only a real departure (tab closed, navigated away, Stop) flips this true, which
+ *  is the signal to close the channel and refund the advertiser's unspent deposit. */
+export function isGone(campaignId: string, viewer: string): boolean {
+  const s = sessions.get(key(campaignId, viewer));
+  return !!s && s.lastBeat > 0 && Date.now() - s.lastBeat > PRESENCE_TTL_MS;
+}
+
+/** Drop a session entirely (on explicit stop) so a fresh watch starts clean. */
+export function endSession(campaignId: string, viewer: string): void {
+  sessions.delete(key(campaignId, viewer));
 }

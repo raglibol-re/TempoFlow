@@ -104,3 +104,33 @@ build prompt or from the MPP docs.
   known demo limitation. (ADR-009)
 - **DEV-J:** stop flag is keyed by clip id (one active viewer per clip in the demo). For
   multi-viewer, key by channelId/viewer. Fine for Phase 1 demo.
+
+---
+
+## ADR-010 — Three-layer attention proof (not a bare heartbeat)
+- **Decision:** Gate advertiser payment on a layered proof in `server/src/attention.ts`
+  instead of an unconditional heartbeat: **L1** passive signals — beats only count while
+  `visible` + `onScreen` (the client also sends `playing`, kept **advisory**: gating on it
+  would deadlock since the ad only plays once payment flows, and emoji ads have no video);
+  **L2** a random server-issued challenge (unpredictable token at a random on-screen
+  position) the viewer must tap within a 6s window; **L3** a per-session token
+  (`POST /attention/session`) that every heartbeat must carry.
+  `isAttentionFresh` is true only while the last beat passing **all three** is within the
+  2.5s TTL.
+- **Alternatives:** (a) keep the bare `{campaignId, viewer}` heartbeat; (b) passive
+  signals only (no challenge); (c) server-rendered challenge content (decode-the-pixels)
+  or signed client attestation.
+- **Rationale:** the original heartbeat proved only that a timer was running — it was
+  defeated by a background tab, a muted ad in a corner, or a browserless `curl` loop
+  (the endpoint was unauthenticated and took the viewer id in the body). "Ads pay you"
+  is only honest if you can't farm it. The layers stack: L1 stops casual gaming, L2
+  forces a human's eyes on the screen, L3 stops sessionless scripting. (a)/(b) leave
+  obvious holes; (c) is the right long-term answer but is more than a hackathon needs.
+- **Threat model:** demo-grade, **not Sybil-proof**. L1 signals are client-reported and
+  could be forged; L2 could be defeated by reimplementing the protocol (the challenge
+  token is delivered as data, not as undecodable pixels). Goal: casual gaming impossible,
+  scripted gaming expensive. Hardening path = option (c).
+- **Touches:** `server/src/attention.ts` (new), `server/src/index.ts` (`/attention/session`,
+  `/heartbeat`, `/attention/answer`, SSE gate), `web/src/flow.ts` + `web/src/main.tsx`
+  (signals, challenge overlay), `server/src/attention-spike.ts` (updated to the new protocol).
+- **Date:** 2026-06-19

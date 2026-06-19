@@ -42,7 +42,10 @@ export function runAd(campaignId: string, viewerId: string) {
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
   const child = spawn(
     npx,
-    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--idleStop", "9000", "--budget", String(remaining)],
+    // idleStop is a long backstop only — the SERVER tears the channel down promptly
+    // when the viewer truly leaves (no heartbeats). A look-away keeps the channel
+    // open so payment resumes instantly, so we must NOT close on mere no-payment.
+    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--campaign", campaign.id, "--idleStop", "120000", "--budget", String(remaining)],
     { cwd: agentDir, env: process.env, stdio: ["ignore", "pipe", "pipe"], shell: true },
   );
   procs.set(key, child);

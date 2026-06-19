@@ -557,7 +557,8 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
     chainId: TEMPO_CHAIN_ID,
     recipient: viewer.address, // money flows IN to the viewer
     operator: operatorAddress,
-    suggestedDeposit: "0.5",
+    suggestedDeposit: "2", // escrow generously — one channel spans the whole watch
+                           // (pauses/resumes across look-aways); unspent is refunded on close
   })(sessionRequest(c));
 
   if (result.status === 402) return corsify(origin, result.challenge);
@@ -590,6 +591,14 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
       for (;;) {
         if (stopRequested.has(stopKey)) {
           stopRequested.delete(stopKey);
+          attention.endSession(campaign.id, viewer.id);
+          return; // explicit Stop → close channel → Tempo refunds unspent deposit
+        }
+        // Viewer truly LEFT (no heartbeats for a while). A look-away keeps beating,
+        // so this stays open and resumes; only a real departure ends it here, which
+        // closes the channel and refunds the advertiser's unspent deposit.
+        if (attention.isGone(campaign.id, viewer.id)) {
+          yield JSON.stringify({ type: "left", campaignId: campaign.id, paidUsd: paid });
           return;
         }
         // Cumulative funded-budget cap (shared across all viewers/sessions).
@@ -603,6 +612,8 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
           ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });
           yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, remainingUsd: campaignRemaining(campaign), advertiser: campaign.advertiser, viewer: viewer.id });
         } else {
+          // Present but looked away → keep the channel OPEN (no reopen cost), just
+          // don't charge. Resumes the instant attention returns.
           yield JSON.stringify({ type: "paused", campaignId: campaign.id });
         }
         await sleep(1000);

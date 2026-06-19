@@ -39,15 +39,28 @@ async function main() {
   const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
   const manager = sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit: "0.5", escrow: ESCROW_CONTRACT });
 
-  // Simulated viewer attention heartbeats.
+  // Simulated viewer attention heartbeats. Open a session for the token (L3),
+  // send all-true signals (L1), and auto-answer any challenge (L2) so the
+  // look-away/look-back narrative below is what drives the pause/resume.
   let attention = true;
-  const beat = () =>
-    fetch(`${SERVER}/heartbeat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER }),
-    }).catch(() => {});
-  const hb = setInterval(() => { if (attention) beat(); }, 1000);
+  const session = (await fetch(`${SERVER}/attention/session`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER }),
+  }).then((r) => r.json()).catch(() => ({}))) as { token?: string };
+  const token = session.token;
+  const beat = async () => {
+    const res = (await fetch(`${SERVER}/heartbeat`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER, token, visible: true, playing: true, onScreen: true }),
+    }).then((r) => r.json()).catch(() => ({}))) as { challenge?: { id: string } | null };
+    if (res?.challenge) {
+      await fetch(`${SERVER}/attention/answer`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: CAMPAIGN, viewer: VIEWER, token, challengeId: res.challenge.id }),
+      }).catch(() => {});
+    }
+  };
+  const hb = setInterval(() => { if (attention) void beat(); }, 1000);
   await beat(); // prime before opening
 
   console.log(`[adv] ${account.address} → paying ${VIEWER} for attention`);

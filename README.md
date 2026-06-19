@@ -19,10 +19,33 @@ real-time money-flow UI with demo reset/fallbacks. **TESTNET ONLY — never real
 | When you… | Money flows… | How |
 |---|---|---|
 | **Watch a creator** | **out**: you → creator, per second | Watchtime, not subscriptions. Scroll away = instant stop + refund. |
-| **Watch an ad** | **in**: advertiser → you, per second | Ads pay *you* — but **only for proven attention** (heartbeat-gated). |
+| **Watch an ad** | **in**: advertiser → you, per second | Ads pay *you* — but **only for proven attention** (layered proof, below). |
 
 The attention you spend on ads finances the creators you watch — a potentially
 self-sustaining feed.
+
+## Proving attention (anti-fraud)
+
+"Ads pay you" only works if you can't get paid for *ignoring* the ad. A naive
+heartbeat proves a timer is running, not that a human is watching — you could leave
+it in a background tab, or even skip the browser entirely and `curl` the heartbeat in
+a loop. FLOW gates payment on a **three-layer proof** instead
+([server/src/attention.ts](server/src/attention.ts)):
+
+1. **Passive signals (Layer 1).** A heartbeat only counts while the tab is **visible**
+   and the player is **on-screen** (`IntersectionObserver`); the client also reports
+   whether the video is **playing** (advisory — not gated, since the ad only starts
+   playing *after* payment flows, so requiring it would deadlock). Kills the
+   background-tab / scrolled-away / manual-look-away cheats.
+2. **Active challenge (Layer 2).** At random intervals the server issues an
+   unpredictable token at a **random on-screen position**; you must tap that target
+   within a few seconds to keep earning. This is what forces eyes on the screen.
+3. **Session binding (Layer 3).** Every heartbeat must carry a per-session token issued
+   when the ad opens — a sessionless `curl` loop mints zero attention.
+
+The layers stack: 1 stops casual gaming, 2 forces real attention, 3 stops scripted
+abuse. **Demo-grade, not Sybil-proof** — Layer 1 signals are client-reported. See
+[docs/01-architecture.md](docs/01-architecture.md) and [ADR-010](docs/06-decisions.md).
 
 ## Why only on Tempo
 
@@ -46,8 +69,9 @@ Open **http://localhost:5173** (a multi-user, YouTube/Twitch-style dashboard):
 - **Home**: a multi-channel feed — **Watch** any clip → money streams **out** to *that*
   creator per second; **Skip** → settle on-chain + refund. Collab clips show a 70/20/10 split.
 - **Studio**: post your own clip → it joins the feed and earns to your wallet.
-- **Earn**: watch an ad → an advertiser pays **you** per second of attention; **Look away**
-  and the payment pauses (heartbeat-gated).
+- **Earn**: watch an ad → an advertiser pays **you** per second of attention; **Look away**,
+  background the tab, scroll the ad off-screen, or ignore the random "tap to prove you're
+  watching" prompt and the payment pauses (three-layer attention proof — see above).
 - **Company** accounts: a campaigns view; viewers who watch your ad get paid by you.
 
 > If the page ever shows a stale error after a code change, hard-refresh (Ctrl+Shift+R) —
@@ -88,7 +112,7 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 - ✅ Both money directions live over MPP sessions on Tempo testnet
 - ✅ Skip / attention-loss stops payment instantly and refunds unused deposit
 - ✅ Viewer net balance rises from ads, falls from creators — live
-- ✅ Attention heartbeat gate prevents paying for ignored ads
+- ✅ Three-layer attention proof (passive signals + random tap challenge + session-bound heartbeats) prevents paying for ignored or scripted ads
 - ✅ Curator + Advertiser agents run autonomously with spend controls + on-chain settle
 - ✅ `/openapi.json` discovery present and valid (`mppx discover validate`)
 - ✅ Receipts / live flow feed in the UI

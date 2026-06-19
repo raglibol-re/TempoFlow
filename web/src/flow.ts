@@ -90,6 +90,11 @@ export const sendHeartbeat = (
 /** Tap the challenge target → echoes its id back so payment resumes. */
 export const answerChallenge = (campaignId: string, viewer: string, token: string | undefined, challengeId: string) =>
   jpost("/attention/answer", { campaignId, viewer, token, challengeId }, "answer challenge").catch(() => ({ ok: false }));
+/** Tell the server you LEFT the ad → it closes the channel and Tempo refunds the
+ *  advertiser the unspent deposit. (A look-away does NOT call this — the channel
+ *  stays open so payment resumes instantly.) */
+export const stopAd = (campaignId: string, viewer: string) =>
+  jpost(`/attention/${campaignId}/${viewer}/stop`, {}, "stop ad").catch(() => {});
 export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-ad", { campaignId, viewerId }, "start advertiser").catch(() => {});
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;

@@ -36,10 +36,14 @@ const log = makeLogger("advertiser");
 async function main() {
   // Act as a company; pay a specific viewer for attention.
   const all = await fetchDemoUsers();
-  const company = all.find((u) => u.role === "advertiser" && (!f.as || u.id === f.as)) ?? all.find((u) => u.role === "advertiser");
-  const target = all.find((u) => u.role === "viewer" && (!f.to || u.id === f.to)) ?? all.find((u) => u.role === "viewer");
+  // Resolve EXACTLY who adrunner specified — by id, regardless of role. Connected
+  // wallets are role "creator" but can still advertise (pay) and earn (be paid),
+  // so we must NOT filter the viewer/company by role (that paid the wrong person).
+  const company = (f.as ? all.find((u) => u.id === f.as) : undefined) ?? all.find((u) => u.role === "advertiser");
+  const target = (f.to ? all.find((u) => u.id === f.to) : undefined) ?? all.find((u) => u.role === "viewer");
   if (!company || !target) throw new Error("need an advertiser + a viewer user on the server");
-  const { manager } = makeManager(company.key);
+  if (!company.key) throw new Error(`advertiser ${company.id} has no server-side key — cannot pay from its wallet`);
+  const { manager } = makeManager(company.key, "2"); // generous escrow; unspent refunds on close
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
   log.info(`advertiser acting as ${company.name} → paying viewer ${target.name}`, { budget: BUDGET, targetTags: TARGET_TAGS });
 
@@ -51,6 +55,7 @@ async function main() {
   // 2) Pick this company's campaign (or one matching targeting tags).
   const campaignList: Campaign[] = await fetch(`${SERVER}/campaigns`).then((r) => r.json()).then((j: any) => j.campaigns ?? []);
   const campaign =
+    (f.campaign ? campaignList.find((c) => c.id === f.campaign) : undefined) ??
     campaignList.find((c) => c.ownerId === company.id) ??
     campaignList.find((c) => !TARGET_TAGS.length || c.tags.some((t) => TARGET_TAGS.includes(t))) ??
     campaignList[0];
