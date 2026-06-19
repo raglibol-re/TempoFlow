@@ -167,6 +167,11 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
     try { setSummary((await handle.current.stop()) ?? null); } catch (e: any) { onError(e?.message ?? String(e)); }
     handle.current = null; setPhase("paused"); onSettled();
   }
+  function togglePlayback() {
+    if (phase === "opening" || phase === "closing") return;
+    if (phase === "watching") { void closeOut("ended"); return; }
+    void start();
+  }
   const live = phase === "watching";
   const pct = Math.min(100, (spent / deposit) * 100);
 
@@ -175,13 +180,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
       <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back</button><span className="muted">watching</span></div>
       <div className="watch">
         <div>
-          <div className="player">
+          <div className="player click-player" onClick={togglePlayback} title={live ? "click to stop" : "click to start"}>
             {clip.hasVideo
-              ? <video ref={video} src={videoSrc(clip.id)} loop playsInline controls style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
+              ? <video ref={video} src={videoSrc(clip.id)} loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
-            {phase === "idle" && <div className="ov">▶ Press “Watch” to start — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
+            {phase === "idle" && <div className="ov">▶ Click the video or press “Watch” — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
             {phase === "opening" && <div className="ov">opening payment channel on Tempo… (~3–6s)</div>}
-            {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of funds — payment stopped, so playback stopped." : "⏸ Paused — payment stopped."}</div>}
+            {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of funds — payment stopped, so playback stopped." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
@@ -250,6 +255,10 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   const player = useRef<HTMLDivElement | null>(null);
   const token = useRef<string | undefined>(undefined); // per-session token (Layer 3)
   const startWatch = () => { baseline.current = null; prev.current = 0; setEarned(0); setStarted(false); setAttention(true); setWatching(true); };
+  const toggleAdPlayback = () => {
+    if (!watching) { startWatch(); return; }
+    if (funded) setAttention((a) => !a);
+  };
   // Truly leaving (Stop / navigate away) closes the channel → advertiser refunded.
   useEffect(() => () => { stopAd(ad.id, me.id); }, [ad.id, me.id]);
 
@@ -346,17 +355,17 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
       <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back to ads</button><span className="muted">earning from an ad</span></div>
       <div className="watch">
         <div>
-          <div className="player ad" ref={player}>
+          <div className="player ad click-player" ref={player} onClick={toggleAdPlayback} title={!watching ? "click to start" : attention ? "click to pause" : "click to resume"}>
             {ad.hasVideo
-              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline controls style={{ opacity: live ? 1 : 0.35 }} />
+              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
             {!watching
-              ? <div className="ov ov-watch"><button className="btn btn-lg" onClick={startWatch}>▶ Watch ad</button><div className="muted" style={{ marginTop: 10 }}>get paid {usd(price)}/sec while you watch</div></div>
+              ? <div className="ov ov-watch"><button className="btn btn-lg" onClick={(e) => { e.stopPropagation(); startWatch(); }}>▶ Watch ad</button><div className="muted" style={{ marginTop: 10 }}>or click the video · get paid {usd(price)}/sec</div></div>
               : !funded
               ? <div className="ov">⛔ This ad is out of funding — it can’t pay, so it won’t play.</div>
               : !attention
-              ? <div className="ov">🙈 looked away — paused. Your Tempo channel stays open — look back to resume instantly.</div>
+              ? <div className="ov">🙈 paused. Click the video to resume instantly.</div>
               : !visible
               ? <div className="ov">🛑 tab in the background — attention can’t be proven, paused</div>
               : !onScreen
@@ -369,7 +378,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
               <button
                 className="att-challenge"
                 style={{ left: challenge.x + "%", top: challenge.y + "%" }}
-                onClick={() => proveAttention(challenge.id)}
+                onClick={(e) => { e.stopPropagation(); proveAttention(challenge.id); }}
               >👀 still watching? tap to keep earning</button>
             )}
           </div>

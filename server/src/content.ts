@@ -9,10 +9,19 @@ import { getUser } from "./users.js";
 import {
   clipsCount, clipsAll, clipById, clipInsert, clipSetPrice,
   campaignsCount, campaignsAll, campaignById, campaignInsert, campaignSetBudget,
+  clipSetVideo, campaignSetVideo,
   type CampaignRow,
 } from "./db.js";
 
 const PLATFORM = "0xF10W0000000000000000000000000000000000FE" as `0x${string}`;
+const SEED_VIDEO: Record<string, string> = {
+  "clip-aurora": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+  "clip-synth": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+  "clip-speedrun": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+  "clip-collab": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm",
+  "camp-tempo": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+  "camp-acme": "https://media.w3.org/2010/05/bunny/trailer.mp4",
+};
 
 export function initContent(): void {
   if (clipsCount() === 0) {
@@ -39,12 +48,20 @@ export function initContent(): void {
       });
     }
   }
+  for (const [id, url] of Object.entries(SEED_VIDEO)) {
+    const clip = clipById(id);
+    if (clip && !clip.hasVideo) clipSetVideo(id, url);
+  }
   if (campaignsCount() === 0) {
     // Both seed ads ship FUNDED ($5) so they reliably start in the demo. The
     // "no funding → no payout" rule is still enforced — newly created ads start
     // at $0 until the advertiser funds them.
     campaignInsert({ id: "camp-tempo", advertiser: "Tempo Pay", ownerId: "tempo", title: "Send money at the speed of light", tags: ["fintech", "crypto"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "5", hasVideo: false, thumb: "🛰️" });
     campaignInsert({ id: "camp-acme", advertiser: "Acme Cloud", ownerId: "acme", title: "Deploy in one command", tags: ["developer", "cloud"], pricePerSec: PRICES.attentionPerSecond, maxBudget: "5", hasVideo: false, thumb: "☁️" });
+  }
+  for (const [id, url] of Object.entries(SEED_VIDEO)) {
+    const campaign = campaignById(id);
+    if (campaign && !campaign.hasVideo) campaignSetVideo(id, url);
   }
 }
 

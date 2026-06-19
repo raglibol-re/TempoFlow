@@ -44,6 +44,7 @@ import * as attention from "./attention.js";
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
 const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
 const IMG_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif" };
+const isRemoteVideo = (path: string) => /^https?:\/\//i.test(path);
 
 /** Persist an uploaded video file → returns its on-disk filename. */
 async function saveUploadedVideo(file: File): Promise<string> {
@@ -382,6 +383,9 @@ app.get("/video/:id", (c) => {
   const item = (getClip(id) ?? getCampaign(id)) as any;
   if (!item?.videoPath) return c.json({ error: "no video for this id" }, 404);
   const clip = item;
+  if (isRemoteVideo(clip.videoPath)) {
+    return c.redirect(clip.videoPath, 302);
+  }
   const path = join(uploadsDir, clip.videoPath);
   if (!existsSync(path)) return c.json({ error: "file missing" }, 404);
   const total = statSync(path).size;

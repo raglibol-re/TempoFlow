@@ -145,6 +145,9 @@ export function clipInsert(c: ClipRow & { createdAt?: number }) {
 export function clipSetPrice(id: string, pricePerSec: string) {
   db.prepare("UPDATE clips SET pricePerSec=? WHERE id=?").run(pricePerSec, id);
 }
+export function clipSetVideo(id: string, videoPath: string, thumb?: string) {
+  db.prepare("UPDATE clips SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);
+}
 
 // ── Campaigns (ads) ──────────────────────────────────────────────────────────
 export type CampaignRow = Campaign & { videoPath?: string };
@@ -175,4 +178,7 @@ export function campaignInsert(c: CampaignRow) {
 /** Raise an ad's funded budget cap (advertiser tops up funding). */
 export function campaignSetBudget(id: string, maxBudget: string) {
   db.prepare("UPDATE campaigns SET maxBudget=? WHERE id=?").run(maxBudget, id);
+}
+export function campaignSetVideo(id: string, videoPath: string, thumb?: string) {
+  db.prepare("UPDATE campaigns SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);
 }
