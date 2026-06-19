@@ -29,6 +29,45 @@ export interface Clip {
   hasVideo?: boolean;
   /** Optional poster emoji/thumbnail hint. */
   thumb?: string;
+  /** True if this is a LIVE stream (loops a source; viewers pay per second and a
+   *  shared real-time audience/applause meter aggregates across all of them). */
+  live?: boolean;
+}
+
+/** Live-stream aggregate stats (across all concurrent viewers of a live clip). */
+export interface LiveStats {
+  live: boolean;
+  viewers: number; // concurrent viewers right now
+  perSecUsd: number; // combined $/sec flowing to the creator from all viewers
+  totalUsd: number; // total paid to the creator this live session
+  applause: number; // cumulative 👏 cheers
+}
+
+/** A creator funding goal — supporters pledge into escrow; if the goal is reached
+ *  the pledges are captured to the creator, otherwise refunded at the deadline.
+ *  (Trustless crowdfund on the escrow/refund primitive.) */
+export interface Goal {
+  id: string;
+  creatorId: string;
+  creator: string; // display name
+  title: string;
+  targetUsd: string;
+  deadline: number; // ms epoch
+  status: "active" | "funded" | "expired";
+  createdAt: number;
+  // ── computed ──
+  pledgedUsd?: number; // total currently escrowed (or captured)
+  backers?: number; // distinct backers
+  viewerPledgedUsd?: number; // how much the requesting viewer has pledged
+}
+
+/** Result of a real-time second-price (Vickrey) attention auction: the winning
+ *  advertiser, the clearing price the viewer actually earns, and the full bid book. */
+export interface AuctionResult {
+  winner?: Campaign; // highest funded bid
+  clearingUsd: number; // second-highest bid (or reserve) — what the viewer earns
+  reserveUsd: number; // floor price
+  bids: { campaignId: string; advertiser: string; bidUsd: number; funded: boolean }[];
 }
 
 /** An advertiser ad: a funded video that pays viewers per second of attention.

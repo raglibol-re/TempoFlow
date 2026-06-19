@@ -149,7 +149,7 @@ export interface AppBalance {
   transactions: Array<{ id: string; type: string; amount: string; direction: "credit" | "debit"; status: string; createdAt: number }>;
 }
 export const fetchAppBalance = (as: string) => jget(`/api/balance?as=${as}`, "load app balance") as Promise<AppBalance>;
-export const fetchBalance = (as: string) => fetchAppBalance(as).then((j) => j.balance ?? 0);
+export const fetchBalance = (as: string) => jget(`/onchain-balance?as=${as}`, "load balance").then((j) => (j.balance ?? 0) as number);
 export const createTopupCheckoutSession = (as: string, amount: number) =>
   jpost("/api/stripe/create-topup-checkout-session", { as, amount }, "create checkout session") as Promise<{ url?: string; sessionId?: string }>;
 export const syncCheckoutSession = (as: string, sessionId: string) =>

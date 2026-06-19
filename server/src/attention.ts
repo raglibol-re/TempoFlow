@@ -51,6 +51,8 @@ interface Session {
   lastGoodBeat: number; // ms timestamp of the last beat that passed L1+L3 and wasn't challenge-overdue
   challenge: (Challenge & { issuedAt: number }) | null;
   nextChallengeAt: number; // when the next challenge becomes due
+  rewardRate?: number; // override $/sec credited to the viewer (auction clearing price);
+                       // undefined → pay the campaign's own pricePerSec
 }
 
 const sessions = new Map<string, Session>();
@@ -62,7 +64,7 @@ const scheduleNext = (now: number) => now + rand(CHALLENGE_MIN_GAP_MS, CHALLENGE
 
 /** Open (or re-open) an attention session for a viewer on a campaign. Returns the
  *  token the client must include with every subsequent heartbeat. */
-export function openSession(campaignId: string, viewer: string): { token: string } {
+export function openSession(campaignId: string, viewer: string, rewardRate?: number): { token: string } {
   const now = Date.now();
   const token = newToken();
   sessions.set(key(campaignId, viewer), {
@@ -71,8 +73,15 @@ export function openSession(campaignId: string, viewer: string): { token: string
     lastGoodBeat: 0,
     challenge: null,
     nextChallengeAt: scheduleNext(now),
+    rewardRate: rewardRate != null && rewardRate > 0 ? +Number(rewardRate).toFixed(6) : undefined,
   });
   return { token };
+}
+
+/** The per-second $ the viewer should be CREDITED (auction clearing price if this
+ *  session was opened via an auction win; otherwise undefined → use campaign price). */
+export function getRewardRate(campaignId: string, viewer: string): number | undefined {
+  return sessions.get(key(campaignId, viewer))?.rewardRate;
 }
 
 export interface HeartbeatResult {

@@ -33,7 +33,7 @@ import {
   fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
-import { chargeForStreamingSeconds, creditAdReward, creditDemoFunds, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
+import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
 import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, syncCheckoutSession } from "./stripe.js";
 import {
   userInsert, userUpdateProfile, type CampaignRow,

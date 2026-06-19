@@ -146,3 +146,25 @@ export function appSpentOnContent(contentId: string): number {
   return ledgerConfirmedSumByMetadata("ad_reward", "campaignId", contentId)
     + ledgerConfirmedSumByMetadata("stream_charge", "clipId", contentId);
 }
+
+/** Generic confirmed CREDIT to a user's app balance (tips received, AI/auction/live
+ *  earnings, pledge refunds…). `kind` distinguishes the flow in metadata. */
+export function appCredit(userId: string, amount: number, kind: string, metadata: Record<string, unknown> = {}): { balance: number; amount: number } {
+  const amt = +Number(amount).toFixed(6);
+  if (!(amt > 0)) return { balance: getAppBalance(userId), amount: 0 };
+  const now = Date.now();
+  ledgerInsert({ id: txId("lt"), userId, type: "adjustment", amount: money(amt), currency: APP_CURRENCY, direction: "credit", status: "confirmed", metadata: { kind, ...metadata }, createdAt: now, confirmedAt: now });
+  return { balance: getAppBalance(userId), amount: amt };
+}
+
+/** Generic confirmed DEBIT from a user's app balance (tips/AI/pledges paid out).
+ *  Fails (ok:false) if the balance can't cover it. */
+export function appDebit(userId: string, amount: number, kind: string, metadata: Record<string, unknown> = {}): { ok: boolean; balance: number; amount: number; reason?: string } {
+  const amt = +Number(amount).toFixed(6);
+  const balance = getAppBalance(userId);
+  if (!(amt > 0)) return { ok: true, balance, amount: 0 };
+  if (balance + 1e-9 < amt) return { ok: false, balance, amount: amt, reason: "insufficient_balance" };
+  const now = Date.now();
+  ledgerInsert({ id: txId("lt"), userId, type: "adjustment", amount: money(amt), currency: APP_CURRENCY, direction: "debit", status: "confirmed", metadata: { kind, ...metadata }, createdAt: now, confirmedAt: now });
+  return { ok: true, balance: getAppBalance(userId), amount: amt };
+}

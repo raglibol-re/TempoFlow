@@ -25,8 +25,18 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS clips (
     id TEXT PRIMARY KEY, title TEXT, creator TEXT, ownerId TEXT, tags TEXT,
     durationSec INTEGER, pricePerSec TEXT, recipients TEXT, hasVideo INTEGER,
-    videoPath TEXT, thumb TEXT, createdAt INTEGER
+    videoPath TEXT, thumb TEXT, createdAt INTEGER, live INTEGER DEFAULT 0
   );
+  -- Creator funding goals + their escrowed pledges (trustless crowdfund).
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY, creatorId TEXT, creator TEXT, title TEXT,
+    targetUsd TEXT, deadline INTEGER, status TEXT, createdAt INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS pledges (
+    id TEXT PRIMARY KEY, goalId TEXT, backerId TEXT, amountUsd TEXT,
+    status TEXT, createdAt INTEGER  -- status: escrowed | captured | refunded
+  );
+  CREATE INDEX IF NOT EXISTS idx_pledges_goal ON pledges(goalId);
   CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY, advertiser TEXT, ownerId TEXT, title TEXT, tags TEXT,
     pricePerSec TEXT, maxBudget TEXT, hasVideo INTEGER, videoPath TEXT, thumb TEXT
@@ -74,6 +84,8 @@ for (const col of ["bio TEXT", "pic TEXT", "banner TEXT", "followPrice TEXT"]) {
 for (const col of ["stripeCustomerId TEXT", "internalWalletId TEXT", "tempoWalletId TEXT", "cachedBalance TEXT DEFAULT '0'"]) {
   try { db.exec(`ALTER TABLE users ADD COLUMN ${col}`); } catch { /* already present */ }
 }
+// `live` flag on pre-existing clip tables.
+try { db.exec(`ALTER TABLE clips ADD COLUMN live INTEGER DEFAULT 0`); } catch { /* already present */ }
 
 export interface DbUser {
   id: string;
@@ -250,6 +262,7 @@ function rowToClip(r: any): ClipRow {
     tags: JSON.parse(r.tags || "[]"), durationSec: r.durationSec,
     pricePerSec: r.pricePerSec, recipients: JSON.parse(r.recipients || "[]"),
     hasVideo: !!r.hasVideo, videoPath: r.videoPath || undefined, thumb: r.thumb || undefined,
+    live: !!r.live,
   };
 }
 export function clipsCount(): number {
@@ -264,15 +277,19 @@ export function clipById(id: string): ClipRow | undefined {
 }
 export function clipInsert(c: ClipRow & { createdAt?: number }) {
   db.prepare(`INSERT OR REPLACE INTO clips
-    (id,title,creator,ownerId,tags,durationSec,pricePerSec,recipients,hasVideo,videoPath,thumb,createdAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (id,title,creator,ownerId,tags,durationSec,pricePerSec,recipients,hasVideo,videoPath,thumb,createdAt,live)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(c.id, c.title, c.creator, c.ownerId, JSON.stringify(c.tags), c.durationSec,
       c.pricePerSec, JSON.stringify(c.recipients), c.hasVideo ? 1 : 0,
-      c.videoPath ?? null, c.thumb ?? null, c.createdAt ?? Date.now());
+      c.videoPath ?? null, c.thumb ?? null, c.createdAt ?? Date.now(), c.live ? 1 : 0);
 }
 /** Update a clip's price-per-second (creators can re-price anytime). */
 export function clipSetPrice(id: string, pricePerSec: string) {
   db.prepare("UPDATE clips SET pricePerSec=? WHERE id=?").run(pricePerSec, id);
+}
+/** Flip a clip's LIVE flag (creator goes live / ends the stream). */
+export function clipSetLive(id: string, live: boolean) {
+  db.prepare("UPDATE clips SET live=? WHERE id=?").run(live ? 1 : 0, id);
 }
 export function clipSetVideo(id: string, videoPath: string, thumb?: string) {
   db.prepare("UPDATE clips SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);
@@ -311,3 +328,28 @@ export function campaignSetBudget(id: string, maxBudget: string) {
 export function campaignSetVideo(id: string, videoPath: string, thumb?: string) {
   db.prepare("UPDATE campaigns SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);
 }
+
+// ── Goals + pledges (crowdfund escrow) ───────────────────────────────────────
+export interface GoalRow { id: string; creatorId: string; creator: string; title: string; targetUsd: string; deadline: number; status: "active" | "funded" | "expired"; createdAt: number }
+export interface PledgeRow { id: string; goalId: string; backerId: string; amountUsd: string; status: "escrowed" | "captured" | "refunded"; createdAt: number }
+export function goalInsert(g: GoalRow) {
+  db.prepare("INSERT OR REPLACE INTO goals (id,creatorId,creator,title,targetUsd,deadline,status,createdAt) VALUES (?,?,?,?,?,?,?,?)")
+    .run(g.id, g.creatorId, g.creator, g.title, g.targetUsd, g.deadline, g.status, g.createdAt);
+}
+export const goalById = (id: string): GoalRow | undefined => (db.prepare("SELECT * FROM goals WHERE id=?").get(id) as any) || undefined;
+export const goalsByCreator = (creatorId: string): GoalRow[] => db.prepare("SELECT * FROM goals WHERE creatorId=? ORDER BY createdAt DESC").all(creatorId) as any[];
+export const goalsAll = (): GoalRow[] => db.prepare("SELECT * FROM goals ORDER BY createdAt DESC").all() as any[];
+export const goalSetStatus = (id: string, status: GoalRow["status"]) => db.prepare("UPDATE goals SET status=? WHERE id=?").run(status, id);
+export function pledgeInsert(p: PledgeRow) {
+  db.prepare("INSERT OR REPLACE INTO pledges (id,goalId,backerId,amountUsd,status,createdAt) VALUES (?,?,?,?,?,?)")
+    .run(p.id, p.goalId, p.backerId, p.amountUsd, p.status, p.createdAt);
+}
+export const pledgesForGoal = (goalId: string): PledgeRow[] => db.prepare("SELECT * FROM pledges WHERE goalId=? ORDER BY createdAt DESC").all(goalId) as any[];
+export const pledgeSetStatus = (id: string, status: PledgeRow["status"]) => db.prepare("UPDATE pledges SET status=? WHERE id=?").run(status, id);
+/** Sum of currently-escrowed (or already-captured) pledges toward a goal. */
+export const goalPledgedUsd = (goalId: string): number =>
+  +((db.prepare("SELECT COALESCE(SUM(CAST(amountUsd AS REAL)),0) s FROM pledges WHERE goalId=? AND status IN ('escrowed','captured')").get(goalId) as any).s as number).toFixed(6);
+export const goalBackerCount = (goalId: string): number =>
+  (db.prepare("SELECT COUNT(DISTINCT backerId) n FROM pledges WHERE goalId=? AND status IN ('escrowed','captured')").get(goalId) as any).n as number;
+export const viewerPledgedUsd = (goalId: string, backerId: string): number =>
+  +((db.prepare("SELECT COALESCE(SUM(CAST(amountUsd AS REAL)),0) s FROM pledges WHERE goalId=? AND backerId=? AND status IN ('escrowed','captured')").get(goalId, backerId) as any).s as number).toFixed(6);

@@ -51,6 +51,8 @@ export const PRICES = {
   creatorPerSecond: env("PRICE_CREATOR_PER_SEC") ?? "0.002",
   /** Advertiser → Viewer, charged per second of *proven* attention. */
   attentionPerSecond: env("PRICE_ATTENTION_PER_SEC") ?? "0.004",
+  /** Viewer → Creator, charged per generated token when chatting a creator's AI. */
+  askPerToken: env("PRICE_ASK_PER_TOKEN") ?? "0.0008",
 } as const;
 
 /**

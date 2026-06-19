@@ -11,9 +11,9 @@
   },
   "dependencies": {
     "@flow/shared": "workspace:*",
-    "@tsparticles/engine": "^4.2.1",
-    "@tsparticles/react": "^4.2.1",
-    "@tsparticles/slim": "^4.2.1",
+    "@tsparticles/engine": "^3.9.1",
+    "@tsparticles/react": "^3.0.0",
+    "@tsparticles/slim": "^3.9.1",
     "clsx": "^2.1.1",
     "framer-motion": "^11.5.0",
     "mppx": "^0.7.0",

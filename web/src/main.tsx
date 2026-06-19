@@ -241,6 +241,8 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   }
   const live = phase === "watching";
   const pct = Math.min(100, (spent / deposit) * 100);
+  const price = Number(clip.pricePerSec);
+  const broke = balance != null && balance < deposit; // not enough on-chain pathUSD to open the channel
 
   return (
     <div className="page">
