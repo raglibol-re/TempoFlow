@@ -15,6 +15,7 @@ import { Hono } from "hono";
 import { generate } from "mppx/discovery";
 import { parseUnits } from "viem";
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
@@ -66,13 +67,46 @@ const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov
 const IMG_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif" };
 const isRemoteVideo = (path: string) => /^https?:\/\//i.test(path);
 
-/** Persist an uploaded video file → returns its on-disk filename. */
+/** Locate an ffmpeg binary: FFMPEG_PATH env, else the bundled `ffmpeg-static` if it's
+ *  installed. Returns null if none is available (transcoding is then skipped). */
+async function ffmpegBin(): Promise<string | null> {
+  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  try { const spec = "ffmpeg-static"; const m: any = await import(spec); return (m?.default ?? m) || null; } catch { return null; }
+}
+/** Transcode `input` → a small, fast-start web MP4 at `outPath` (≤720p, H.264 CRF 28,
+ *  AAC, +faststart). Returns true on success. ~30× smaller than typical phone uploads,
+ *  which is the difference between instant playback and a multi-second stall over a
+ *  tunnel. Falls back (returns false) if no ffmpeg is available. */
+async function transcodeToWebMp4(input: string, outPath: string): Promise<boolean> {
+  const bin = await ffmpegBin();
+  if (!bin) return false;
+  return await new Promise<boolean>((res) => {
+    const p = spawn(bin, [
+      "-y", "-i", input,
+      "-vf", "scale=-2:'min(720,ih)'",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+      "-c:a", "aac", "-b:a", "128k",
+      "-movflags", "+faststart", outPath,
+    ], { stdio: "ignore" });
+    p.on("error", () => res(false));
+    p.on("exit", (code) => res(code === 0));
+  });
+}
+
+/** Persist an uploaded video file → returns its on-disk filename. Transcodes to a
+ *  small fast-start web MP4 so it streams quickly (the raw upload is often 20–25 MB,
+ *  which is painfully slow over a tunnel). Keeps the original if ffmpeg is unavailable. */
 async function saveUploadedVideo(file: File): Promise<string> {
   mkdirSync(uploadsDir, { recursive: true });
   const ext = (file.name.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  writeFileSync(join(uploadsDir, name), Buffer.from(await file.arrayBuffer()));
-  return name;
+  const base = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const rawName = `${base}.${ext}`;
+  const rawPath = join(uploadsDir, rawName);
+  writeFileSync(rawPath, Buffer.from(await file.arrayBuffer()));
+  const webName = `${base}.web.mp4`;
+  const ok = await transcodeToWebMp4(rawPath, join(uploadsDir, webName)).catch(() => false);
+  if (ok) { try { unlinkSync(rawPath); } catch { /* ignore */ } return webName; }
+  return rawName; // ffmpeg unavailable → serve the original (still range-streamed + cached)
 }
 
 /** Persist an uploaded profile image → returns its on-disk filename (pfp-*). */
