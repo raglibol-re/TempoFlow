@@ -26,7 +26,8 @@ export const exportPrivateKey = (as: string): Promise<{ address: `0x${string}`; 
  * Resolve the backend URL at RUNTIME so a single Vercel build can target any
  * backend (e.g. a local machine exposed via an ngrok/cloudflared tunnel) without
  * rebuilding. Precedence: `?server=<url>` query param (remembered in
- * localStorage) → previously saved value → build-time VITE_SERVER_URL → localhost.
+ * localStorage) → previously saved value → build-time VITE_SERVER_URL → localhost
+ * in local development. Deployed HTTPS sites must use a public HTTPS backend.
  */
 function resolveServerUrl(): string {
   try {
@@ -35,10 +36,25 @@ function resolveServerUrl(): string {
     const saved = localStorage.getItem("flow.serverUrl");
     if (saved) return saved.replace(/\/+$/, "");
   } catch { /* non-browser context — fall through */ }
-  return ((import.meta as any).env?.VITE_SERVER_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const envUrl = (import.meta as any).env?.VITE_SERVER_URL;
+  if (envUrl) return String(envUrl).replace(/\/+$/, "");
+  if (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    return "http://localhost:3000";
+  }
+  return "";
 }
 
 export const SERVER_URL = resolveServerUrl();
+export const SERVER_CONFIGURED = !!SERVER_URL;
+export function saveServerUrl(url: string) {
+  const clean = url.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(clean)) throw new Error("Backend URL must start with http:// or https://");
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && clean.startsWith("http://")) {
+    throw new Error("This deployed site needs an https:// backend URL");
+  }
+  localStorage.setItem("flow.serverUrl", clean);
+  window.location.reload();
+}
 
 export interface DemoUser {
   id: string; name: string; role: Role; handle: string; avatar: string;
@@ -65,6 +81,7 @@ export type { Goal, AuctionResult, LiveStats };
 
 async function jget(path: string, label: string): Promise<any> {
   try {
+    if (!SERVER_URL) throw new Error("backend is not configured");
     const r = await fetch(`${SERVER_URL}${path}`);
     if (!r.ok) throw new Error(`${label}: HTTP ${r.status}`);
     return await r.json();
@@ -72,6 +89,7 @@ async function jget(path: string, label: string): Promise<any> {
 }
 async function jpost(path: string, body: any, label: string): Promise<any> {
   try {
+    if (!SERVER_URL) throw new Error("backend is not configured");
     const r = await fetch(`${SERVER_URL}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`${label}: HTTP ${r.status}`);
     return await r.json();
