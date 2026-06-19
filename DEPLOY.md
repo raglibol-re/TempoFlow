@@ -52,3 +52,28 @@ A `Dockerfile` (Node 24, full monorepo) is included at the repo root.
 
 > CORS is already handled — the server reflects the request `Origin`, so the
 > Vercel domain works without extra config.
+
+## Stripe app credit
+
+Stripe keys are server-only. Do not add them to Vercel frontend variables.
+
+Backend env vars:
+
+```
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+APP_URL=https://your-vercel-app.vercel.app
+```
+
+Local webhook test:
+
+```
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+stripe trigger checkout.session.completed
+```
+
+The app creates checkout sessions at
+`POST /api/stripe/create-topup-checkout-session`. Credit is added only after
+`/api/stripe/webhook` verifies Stripe's signature and writes a confirmed
+`stripe_topup` ledger transaction. Duplicate Stripe sessions/payment intents are
+ignored by unique ledger indexes.

@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "spike": "tsx src/spike-client.ts",
     "spike:attention": "tsx src/attention-spike.ts",
+    "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
     "@hono/node-server": "^1.13.0",
     "hono": "^4.12.18",
     "mppx": "^0.7.0",
+    "stripe": "^22.2.1",
     "viem": "^2.52.0"
   },
   "devDependencies": {

@@ -8,7 +8,7 @@
  */
 
 import { createWallet, fundWallet } from "@flow/shared";
-import { usersCount, usersAll, userInsert, userUpdateProfile, type DbUser } from "./db.js";
+import { usersCount, usersAll, userInsert, userUpdateProfile, userUpdateBilling, type DbUser } from "./db.js";
 
 const DEFS: Omit<DbUser, "address" | "key">[] = [
   { id: "admin", name: "Flo Admin", role: "admin", handle: "admin", avatar: "🛠️", bio: "Keeping TempoFlow running smoothly.", followPrice: "0" },
@@ -45,6 +45,14 @@ export async function initUsers(): Promise<void> {
       userUpdateProfile(d.id, { bio: d.bio, followPrice: d.followPrice });
     }
   }
+  for (const u of usersAll()) {
+    if (!u.internalWalletId || !u.tempoWalletId) {
+      userUpdateBilling(u.id, {
+        internalWalletId: u.internalWalletId ?? `iw_${u.id}`,
+        tempoWalletId: u.tempoWalletId ?? u.address,
+      });
+    }
+  }
   users = usersAll();
   console.log(`[users] ${users.length} users ready`);
 }
@@ -54,6 +62,6 @@ export const byRole = (role: string) => users.filter((u) => u.role === role);
 export const reloadUsers = () => { users = usersAll(); };
 
 export function publicUser(u: DbUser) {
-  const { key, ...rest } = u;
+  const { key, stripeCustomerId, internalWalletId, tempoWalletId, cachedBalance, ...rest } = u;
   return rest;
 }

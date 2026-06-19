@@ -249,6 +249,11 @@ textarea.input { resize: vertical; font-family: inherit; }
 .acct-item.danger { color: var(--out); }
 .acct-item.danger:hover { background: rgba(255,93,115,.12); }
 
+.topup-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.topup-choice { border: 1px solid var(--border); background: var(--surface2); color: var(--text); border-radius: 8px; padding: 14px 10px; font-size: 18px; font-weight: 800; cursor: pointer; }
+.topup-choice:hover { border-color: var(--accent); }
+.topup-choice.on { border-color: var(--accent); background: rgba(145,71,255,.2); box-shadow: 0 0 0 1px var(--accent); }
+
 /* ---- Login footer ---- */
 .login-foot { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 18px; }
 

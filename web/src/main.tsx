@@ -1,8 +1,8 @@
 /**
  * TempoFlow — pay-per-second streaming (Twitch/YouTube/DAZN-style).
  * Watch creators (money out/sec), earn from ads (money in/sec), upload videos,
- * run campaigns, manage your profile. Log in as a demo account or your own
- * Tempo wallet. ⚠️ TESTNET ONLY.
+ * run campaigns, manage your profile. Payments are shown as app credit; Stripe
+ * top-ups and Tempo settlement stay on the server.
  */
 import "./styles.css";
 import { StrictMode, useEffect, useRef, useState } from "react";
@@ -12,17 +12,15 @@ import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, setClipPrice, watchClip,
-  videoSrc, connectTempoAccount, createCampaign, openAttentionSession, answerChallenge, stopAd,
+  videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser,
 } from "./flow";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
-// pathUSD — the Tempo testnet stablecoin (6 decimals); ◎ is its symbol. Balance,
-// money-in and money-out are ALL pathUSD, formatted identically by `usd`/`fmtBal`.
 const nf = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(n) < 1 ? 4 : 2 });
-const usd = (n: number) => "◎" + nf(n);
+const usd = (n: number) => "$" + nf(n);
 const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
@@ -61,23 +59,29 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
 const ROLES: Record<string, string> = { viewer: "Viewers", creator: "Creators", advertiser: "Advertisers" };
 function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: DemoUser) => void; onError: (e: string) => void }) {
   const [key, setKey] = useState(""); const [busy, setBusy] = useState(false);
+  const [name, setName] = useState(""); const [handle, setHandle] = useState("");
   const demo = users.filter((u) => u.key && !u.id.startsWith("me-")); // seed accounts only
   async function connect() {
     if (!key.trim()) return; setBusy(true);
     try { onLogin(await connectTempoAccount(key)); } catch (e: any) { onError(e?.message ?? String(e)); }
     setBusy(false);
   }
+  async function createAccount() {
+    if (!name.trim() || !handle.trim()) return; setBusy(true);
+    try { onLogin(await registerAppAccount(name.trim(), handle.trim())); } catch (e: any) { onError(e?.message ?? String(e)); }
+    setBusy(false);
+  }
   return (
     <div className="login">
       <div className="brand" style={{ fontSize: 30, justifyContent: "center" }}><span className="dot" />Tempo<b>Flow</b></div>
-      <div className="muted" style={{ textAlign: "center", marginTop: 6 }}>Pay-per-second streaming on Tempo. Log in to start.</div>
+      <div className="muted" style={{ textAlign: "center", marginTop: 6 }}>Pay per second, earn from ads, and top up with Stripe.</div>
 
       <div className="login-card">
-        <h3 style={{ marginTop: 0 }}>🪪 Log in with your Tempo account</h3>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste your Tempo <b>testnet</b> private key. One wallet does everything — <b>watch, upload, advertise, earn</b>. (Stored to auto-pay your ads from your wallet. <b>TESTNET ONLY</b> — never a mainnet key.)</div>
+        <h3 style={{ marginTop: 0 }}>Create your account</h3>
         <div className="row" style={{ flexDirection: "column", gap: 8 }}>
-          <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} autoFocus />
-          <button className="btn" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect wallet"}</button>
+          <input className="input" placeholder="Display name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <input className="input" placeholder="handle" value={handle} onChange={(e) => setHandle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createAccount()} />
+          <button className="btn" onClick={createAccount} disabled={busy || !name.trim() || !handle.trim()}>{busy ? "creating…" : "Create account"}</button>
         </div>
       </div>
 
@@ -102,7 +106,15 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
           );
         })}
       </div>
-      <div className="login-foot">⚠️ Testnet only · no real funds · your key never leaves this demo</div>
+      <details className="login-card">
+        <summary>Developer testnet login</summary>
+        <div className="muted" style={{ fontSize: 12.5, margin: "10px 0" }}>Optional: connect a testnet key for legacy Tempo/MPP demos. Normal users do not need this.</div>
+        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
+          <input className="input" type="password" placeholder="0x… testnet private key" value={key} onChange={(e) => setKey(e.target.value)} />
+          <button className="btn btn-ghost" onClick={connect} disabled={busy || !key.trim()}>{busy ? "connecting…" : "Connect testnet account"}</button>
+        </div>
+      </details>
+      <div className="login-foot">No payment keys are stored in the browser.</div>
     </div>
   );
 }
@@ -242,7 +254,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
               </div>
             )}
             {phase === "idle" && <div className="ov">▶ Click the video or press “Watch” — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
-            {phase === "opening" && <div className="ov">opening payment channel on Tempo… (~3–6s)</div>}
+            {phase === "opening" && <div className="ov">starting stream…</div>}
             {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of funds — payment stopped, so playback stopped." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
           <div className="w-title">{clip.title}</div>
@@ -277,12 +289,12 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
             const refunded = Math.max(0, deposit - paid);
             return (
               <div className="receipt">
-                <div className="receipt-head">✓ Settled on Tempo</div>
+                <div className="receipt-head">✓ Charged from app balance</div>
                 <div className="statline"><span className="k">paid to creator</span><span><b>{usd(paid)}</b>{summary.seconds != null ? ` · ${summary.seconds}s` : ""}</span></div>
                 <div className="statline"><span className="k">deposit refunded</span><span style={{ color: "var(--in)" }}>{usd(refunded)}</span></div>
                 {summary.txHash
                   ? <div className="tx" title="click to copy full tx hash" onClick={() => copy(summary.txHash!)}>tx {shortHash(summary.txHash)} <span className="copy">⧉ copy</span></div>
-                  : <div className="tx">settlement recorded on Tempo</div>}
+                  : <div className="tx">transaction recorded in your ledger</div>}
               </div>
             );
           })()}
@@ -480,7 +492,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
               : !onScreen
               ? <div className="ov">⬆️ scroll the ad back into view to keep earning</div>
               : !started
-              ? <div className="ov">⏳ opening a Tempo payment channel… the ad starts the moment the money flows (~5–15s, one time)</div>
+              ? <div className="ov">⏳ preparing reward stream…</div>
               : null}
             {/* Layer 2: random attention challenge — tap it within a few seconds. */}
             {challenge && funded && started && (
@@ -508,10 +520,10 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
             <div className="statline" style={{ marginTop: 5 }}><span className="k">budget left</span><span style={{ color: funded ? "var(--in)" : "var(--out)" }}>{usd(Math.max(0, budget - spent))}</span></div>
           </div>
           <MoneyFlow dir="in" active={attention && paying} />
-          <div className="receipt" style={{ background: "#0f141f", borderColor: "#22304a" }}>💸 Paid per second straight from <b>{ad.advertiser}</b>’s wallet. One Tempo channel runs the whole session — looking away pauses it for free, and every unspent cent of the escrow is refunded to the advertiser when you leave.</div>
+          <div className="receipt" style={{ background: "#0f141f", borderColor: "#22304a" }}>Paid per second from <b>{ad.advertiser}</b> while attention is verified. Looking away pauses rewards immediately.</div>
           {events.length > 0 && (
             <div className="feed-events">
-              <div className="role-chip">your live receipts · settled on Tempo</div>
+              <div className="role-chip">your live receipts</div>
               {events.map((e) => (
                 <div key={e.id} style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "var(--in)" }}>▲ from {e.counterparty}</span>
@@ -528,7 +540,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
                   <button className="btn btn-ghost" onClick={onBack}>Stop</button>
                 </>}
           </div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{!watching ? "press ▶ Watch ad to start earning" : !funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !visible ? "🛑 background tab — paused, come back to keep earning" : !onScreen ? "⬆️ ad scrolled off-screen — paused" : challenge ? "👀 tap the prompt to prove you’re watching" : !started ? "⏳ opening a Tempo payment channel — the ad starts once the money flows" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{!watching ? "press ▶ Watch ad to start earning" : !funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "paused — look back to keep earning" : !visible ? "background tab — paused, come back to keep earning" : !onScreen ? "ad scrolled off-screen — paused" : challenge ? "tap the prompt to prove you’re watching" : !started ? "preparing reward stream" : paying ? "attention proven — being paid" : "attention proven"}</div>
         </div>
       </div>
     </div>
@@ -606,7 +618,7 @@ function EditProfile({ me, onClose, onSaved, onError }: { me: DemoUser; onClose:
         <label className="fld">Display name<input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="fld">Handle<input className="input" value={handle} onChange={(e) => setHandle(e.target.value)} /></label>
         <label className="fld">Bio<textarea className="input" rows={3} maxLength={280} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell people what you create…" /></label>
-        <label className="fld">Super-follow price (pathUSD) — what supporters pay to follow you<input className="input" type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
+        <label className="fld">Super-follow price — what supporters pay to follow you<input className="input" type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn" style={{ flex: 1 }} onClick={save} disabled={busy}>{busy ? "saving…" : "Save profile"}</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -635,7 +647,7 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
     if (!p) return; setBusy(true); setToast(null);
     try {
       const r = await followCreator(me, { id: p.user.id, address: p.user.address, followPrice: p.user.followPrice });
-      setToast(Number(r.amountUsd) > 0 ? `★ You're now supporting ${p.user.name} — paid ${usd(Number(r.amountUsd))} on Tempo${r.txHash ? ` · tx ${shortHash(r.txHash)}` : ""}` : `Now following ${p.user.name}`);
+      setToast(Number(r.amountUsd) > 0 ? `★ You're now supporting ${p.user.name} — paid ${usd(Number(r.amountUsd))}` : `Now following ${p.user.name}`);
       await load(); onBalance();
     } catch (e: any) { onError(e?.message ?? String(e)); }
     setBusy(false);
@@ -667,7 +679,7 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
             <button className={"pstat" + (tab === "supporters" ? " on" : "")} onClick={() => setTab("supporters")}><b>{compact.format(p.followerCount)}</b> supporters</button>
             <button className={"pstat" + (tab === "following" ? " on" : "")} onClick={() => setTab("following")}><b>{compact.format(p.followingCount)}</b> following</button>
             <span className="pstat"><b style={{ color: "var(--in)" }}>{usd(p.followEarnings)}</b> from fans</span>
-            <span className="pill" title="pathUSD balance on Tempo">{fmtBal(p.balance)} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
+            <span className="pill" title="app balance">{fmtBal(p.balance)} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>credit</span></span>
           </div>
         </div>
         <div className="phead-cta">
@@ -718,7 +730,7 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
 
 // ───────────────────────── app ─────────────────────────
 // ───────────────────────── account menu (profile + logout) ─────────────────────────
-function AccountMenu({ me, balance, onProfile, onLogout }: { me: DemoUser; balance: number | null; onProfile: () => void; onLogout: () => void }) {
+function AccountMenu({ me, balance, onProfile, onTopup, onLogout }: { me: DemoUser; balance: number | null; onProfile: () => void; onTopup: () => void; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="acct">
@@ -734,14 +746,44 @@ function AccountMenu({ me, balance, onProfile, onLogout }: { me: DemoUser; balan
                 <div className="muted" style={{ fontSize: 12 }}>@{me.handle}</div>
               </div>
             </div>
-            <div className="acct-row"><span className="k">wallet</span><span className="tx" title="copy address" onClick={() => copy(me.address)}>{me.address.slice(0, 6)}…{me.address.slice(-4)} ⧉</span></div>
             <div className="acct-row"><span className="k">balance</span><span><b>{balance != null ? fmtBal(balance) : "…"}</b></span></div>
             <div className="acct-sep" />
             <button className="acct-item" onClick={() => { setOpen(false); onProfile(); }}>👤 View profile</button>
+            <button className="acct-item" onClick={() => { setOpen(false); onTopup(); }}>＋ Add credit</button>
             <button className="acct-item danger" onClick={() => { setOpen(false); onLogout(); }}>⎋ Log out</button>
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => void; onError: (e: string) => void }) {
+  const [amount, setAmount] = useState(10);
+  const [busy, setBusy] = useState(false);
+  async function checkout() {
+    setBusy(true);
+    try {
+      const session = await createTopupCheckoutSession(me.id, amount);
+      if (!session.url) throw new Error("Stripe did not return a checkout URL");
+      window.location.href = session.url;
+    } catch (e: any) {
+      onError(e?.message ?? String(e));
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><h3>Add credit</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
+        <div className="muted" style={{ marginBottom: 12 }}>Choose an amount. Your balance updates only after Stripe confirms the payment webhook.</div>
+        <div className="topup-grid">
+          {[5, 10, 25].map((v) => (
+            <button key={v} className={"topup-choice" + (amount === v ? " on" : "")} onClick={() => setAmount(v)}>${v}</button>
+          ))}
+        </div>
+        <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={checkout} disabled={busy}>{busy ? "opening Stripe…" : `Continue to Stripe · $${amount}`}</button>
+      </div>
     </div>
   );
 }
@@ -756,7 +798,9 @@ function App() {
   const [view, setView] = useState("home");
   const [current, setCurrent] = useState<Clip | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
+  const [topupOpen, setTopupOpen] = useState(false);
   // ad (earn)
   const [adCampaign, setAdCampaign] = useState<string | null>(null);
   // studio (creator upload)
@@ -772,6 +816,9 @@ function App() {
     refreshFeed();
     fetchCampaigns().then(setCampaigns).catch(() => {});
     try { const saved = localStorage.getItem("tempoflow-me"); if (saved) setMe(JSON.parse(saved)); } catch {}
+    const payment = new URLSearchParams(window.location.search).get("payment");
+    if (payment === "success") setPaymentNotice("Payment received. Your balance will refresh after Stripe confirms it.");
+    if (payment === "cancel") setPaymentNotice("Payment canceled. No credit was added.");
   }, []);
   function refreshFeed() { fetchFeed().then(setFeed).catch((e) => setError(e.message)); }
 
@@ -784,6 +831,19 @@ function App() {
       fetchCampaigns().then(setCampaigns).catch(() => {}); // live funding status
     };
     tick(); const id = setInterval(tick, 3000); return () => clearInterval(id);
+  }, [me]);
+
+  useEffect(() => {
+    if (!me) return;
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    if (params.get("payment") !== "success" || !sessionId) return;
+    syncCheckoutSession(me.id, sessionId)
+      .then(async () => {
+        setPaymentNotice("Payment confirmed. Your credit was added.");
+        setBalance(await fetchBalance(me.id));
+      })
+      .catch(() => setPaymentNotice("Payment received. Waiting for Stripe confirmation."));
   }, [me]);
 
   function login(u: DemoUser) { localStorage.setItem("tempoflow-me", JSON.stringify(u)); setMe(u); setError(null); }
@@ -833,14 +893,16 @@ function App() {
         <div className="brand"><span className="dot" />Tempo<b>Flow</b></div>
         <div className="nav-links">{nav.map(([v, l]) => <button key={v} className={"nav-link" + (view === v ? " active" : "")} onClick={() => go(v)}>{l}</button>)}</div>
         <div className="nav-right">
-          <span className="pill" title="your pathUSD balance on Tempo">{balance != null ? fmtBal(balance) : "◎…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
+          <span className="pill" title="your app balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>credit</span></span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
-          <button className="btn btn-faucet btn-sm" onClick={getFunds} disabled={funding}>{funding ? "funding…" : "🚰 Test funds"}</button>
-          <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onLogout={logout} />
+          <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Add credit</button>
+          <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onTopup={() => setTopupOpen(true)} onLogout={logout} />
         </div>
       </div>
 
       {error && <div className="page" style={{ paddingBottom: 0 }}><div className="toast-err">⚠ {error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}
+      {paymentNotice && <div className="page" style={{ paddingBottom: 0 }}><div className="receipt">{paymentNotice}<button className="btn-ghost btn btn-sm" onClick={() => setPaymentNotice(null)}>×</button></div></div>}
+      {topupOpen && <TopupModal me={me} onClose={() => setTopupOpen(false)} onError={setError} />}
 
       {view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
@@ -870,7 +932,7 @@ function App() {
                     <span className="muted" style={{ fontSize: 13 }}>/ second</span>
                   </div>
                   <button className="btn" onClick={submitUpload} disabled={!file || !title.trim() || uploading}>{uploading ? "uploading…" : "⬆ Publish"}</button>
-                  <div className="muted" style={{ fontSize: 12 }}>You set the price — viewers pay <b>{usd(Number(price) || 0)}/sec</b> straight to your wallet while they watch. You can change it anytime below.</div>
+                  <div className="muted" style={{ fontSize: 12 }}>You set the price — viewers pay <b>{usd(Number(price) || 0)}/sec</b> from their app balance while they watch. You can change it anytime below.</div>
                 </div>
               </div>
               <div className="section-title">Your channel ({myClips.length}) · <span className="chan-link" onClick={() => openProfile(me.id)}>view your profile →</span></div>
@@ -903,7 +965,7 @@ function App() {
 
             {view === "earn" && (<>
               <div className="section-title">Earn — watch ads, get paid for your attention</div>
-              <div className="muted" style={{ margin: "-8px 2px 14px", fontSize: 13 }}>Each ad pays you per second straight from the advertiser’s wallet. Ads with no funding can’t pay.</div>
+              <div className="muted" style={{ margin: "-8px 2px 14px", fontSize: 13 }}>Each ad pays per second while attention is verified. Ads with no funding can’t pay.</div>
               <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))" }}>
                 {campaigns.map((c) => {
                   const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget);
@@ -936,7 +998,7 @@ function App() {
               <div className="section-title">Ad Studio</div>
               <div className="login-card" style={{ marginTop: 0, marginBottom: 18 }}>
                 <h3 style={{ marginTop: 0 }}>Upload an ad</h3>
-                <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Your ad pays viewers per second of proven attention — <b>straight from your wallet, automatically</b>. Set a funded budget; when it runs out the ad stops paying.</div>
+                <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Your ad pays viewers per second of proven attention from your funded campaign budget. When the budget runs out, the ad stops paying.</div>
                 <div className="row" style={{ flexDirection: "column", gap: 9 }}>
                   <input className="input" placeholder="Ad title" value={adTitle} onChange={(e) => setAdTitle(e.target.value)} />
                   <input className="input" placeholder="tags (comma separated)" value={adTags} onChange={(e) => setAdTags(e.target.value)} />
@@ -945,7 +1007,7 @@ function App() {
                     <input className="input" type="number" step="0.05" min="0" placeholder="budget $" value={adBudget} onChange={(e) => setAdBudget(e.target.value)} style={{ flex: 1 }} />
                     <button className="btn" onClick={submitAd} disabled={!adTitle.trim() || publishingAd}>{publishingAd ? "publishing…" : "⬆ Publish ad"}</button>
                   </div>
-                  <div className="muted" style={{ fontSize: 12 }}>Budget is your committed spend cap — top up anytime. Need test funds in your wallet? Use 🚰 above.</div>
+                  <div className="muted" style={{ fontSize: 12 }}>Budget is your committed spend cap. Add app credit from the top bar when you need more.</div>
                 </div>
               </div>
               <div className="section-title">Your ads ({myAds.length})</div>
@@ -965,7 +1027,7 @@ function App() {
                         <div className="muted" style={{ fontSize: 12 }}>{usd(Number(c.pricePerSec))}/sec · {c.tags.join(", ") || "untargeted"}</div>
                         <div className="bar" style={{ marginTop: 7 }}><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--out),#ff9356)" }} /></div>
                         <div className="statline" style={{ marginTop: 5 }}><span className="k">funded budget</span><span>{usd(spent)} / {usd(budget)} · {usd(left)} left</span></div>
-                        <div className="statline"><span className="k">your wallet (pays the ad)</span><span>{c.advertiserBalance != null ? fmtBal(c.advertiserBalance) : "…"}</span></div>
+                        <div className="statline"><span className="k">available app credit</span><span>{c.advertiserBalance != null ? fmtBal(c.advertiserBalance) : "…"}</span></div>
                       </div>
                       <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
                         <span className={"chip " + (funded ? "chip-ok" : "chip-bad")}>{funded ? "✓ funded" : "⛔ unfunded"}</span>
@@ -976,13 +1038,13 @@ function App() {
                 })}
                 {!myAds.length && <div className="muted">No ads yet — upload one above.</div>}
               </div>
-              <div className="receipt" style={{ marginTop: 12 }}>paid to viewers this session (from your wallet): <b>{usd(net?.outUsd ?? 0)}</b></div>
+              <div className="receipt" style={{ marginTop: 12 }}>paid to viewers this session: <b>{usd(net?.outUsd ?? 0)}</b></div>
             </>)}
 
             {/* live receipts */}
             {net && net.events.length > 0 && (
               <div className="feed-events" style={{ marginTop: 20 }}>
-                <div className="role-chip">your live receipts · settled on Tempo</div>
+                <div className="role-chip">your live receipts</div>
                 {net.events.slice(0, 8).map((e) => (
                   <div key={e.id} style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: e.direction === "in" ? "var(--in)" : "var(--out)" }}>{e.direction === "in" ? "▲ from" : "▼ to"} {e.counterparty}</span>

@@ -143,7 +143,17 @@ export interface NetSnapshot {
   events: { id: string; direction: "in" | "out"; amount: string; counterparty: string; contentId: string }[];
 }
 export const fetchNet = (as: string) => jget(`/net?as=${as}`, "load balance") as Promise<NetSnapshot>;
-export const fetchBalance = (as: string) => jget(`/balance?as=${as}`, "load wallet").then((j) => (j.balance ?? 0) as number);
+export interface AppBalance {
+  balance: number;
+  currency: string;
+  transactions: Array<{ id: string; type: string; amount: string; direction: "credit" | "debit"; status: string; createdAt: number }>;
+}
+export const fetchAppBalance = (as: string) => jget(`/api/balance?as=${as}`, "load app balance") as Promise<AppBalance>;
+export const fetchBalance = (as: string) => fetchAppBalance(as).then((j) => j.balance ?? 0);
+export const createTopupCheckoutSession = (as: string, amount: number) =>
+  jpost("/api/stripe/create-topup-checkout-session", { as, amount }, "create checkout session") as Promise<{ url?: string; sessionId?: string }>;
+export const syncCheckoutSession = (as: string, sessionId: string) =>
+  jpost("/api/stripe/sync-checkout-session", { as, sessionId }, "sync checkout session") as Promise<{ ok: boolean; credited?: boolean; paymentStatus?: string }>;
 
 // ── Profiles + pay-to-follow (super-follow) ──────────────────────────────────
 /** URL for a user's uploaded profile picture (404s → caller falls back to symbol). */
@@ -208,6 +218,12 @@ export async function connectTempoAccount(privateKey: string): Promise<DemoUser>
   return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? "🪪", address, key };
 }
 
+export async function registerAppAccount(name: string, handle: string): Promise<DemoUser> {
+  const reg = await jpost("/users", { name, handle, role: "creator" }, "create account");
+  const u = reg.user;
+  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? "🪪", address: u.address, key: "" as `0x${string}` };
+}
+
 /** Advertiser uploads an ad (video + funded budget). */
 export async function uploadAd(as: string, title: string, tags: string[], file: File | null, budgetUsd: number): Promise<Campaign> {
   const fd = new FormData();
@@ -259,17 +275,29 @@ export async function watchClip(
   clip: Clip, me: DemoUser, onTick: (t: Tick) => void,
   onEnd: (reason: "ended" | "out-of-funds") => void, maxDeposit = "0.5",
 ): Promise<WatchHandle> {
-  const mgr = manager(me, maxDeposit);
-  let stream: AsyncIterable<string>;
-  try {
-    stream = await mgr.sse(`${SERVER_URL}/watch/${clip.id}?as=${me.id}`);
-  } catch (e: any) {
-    throw new Error(`open payment channel for "${clip.title}" failed: ${e?.message ?? e}`);
-  }
+  void maxDeposit;
+  const controller = new AbortController();
+  const res = await fetch(`${SERVER_URL}/api/watch/${clip.id}?as=${me.id}`, { signal: controller.signal });
+  if (!res.ok || !res.body) throw new Error(`start stream for "${clip.title}" failed: HTTP ${res.status}`);
   const drained = (async () => {
     try {
-      for await (const data of stream) {
-        try { const t = JSON.parse(data) as Tick; if (t?.second) onTick(t); } catch { /* keep-alive */ }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const t = JSON.parse(line);
+            if (t?.type === "out-of-balance") { onEnd("out-of-funds"); controller.abort(); return; }
+            if (t?.second) onTick(t as Tick);
+          } catch { /* keep-alive */ }
+        }
       }
       onEnd("ended");
     } catch {
@@ -279,19 +307,13 @@ export async function watchClip(
   })();
   return {
     async stop() {
+      controller.abort();
       try { await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" }); }
       catch (e: any) { throw new Error(`stop failed: ${e?.message ?? e}`); }
       await drained;
-      let receipt: any;
-      try { receipt = await mgr.close(); } catch (e: any) { throw new Error(`settle/refund failed: ${e?.message ?? e}`); }
-      // Straight from the on-chain receipt: spent (raw units), units (paid
-      // seconds), the settlement txHash, and the channel id. Refund is derived
-      // by the UI against the deposit it displayed.
       return {
-        spentUsd: rawToUsd(receipt?.spent),
-        seconds: typeof receipt?.units === "number" ? receipt.units : undefined,
-        txHash: receipt?.txHash,
-        channelId: receipt?.channelId ?? receipt?.reference,
+        spentUsd: undefined,
+        seconds: undefined,
       };
     },
   };

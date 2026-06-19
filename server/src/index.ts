@@ -18,7 +18,7 @@ import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
-import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, fundWallet, pathUsdBalance, type Campaign } from "@flow/shared";
+import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, createWallet, fundWallet, pathUsdBalance, type Campaign } from "@flow/shared";
 import { mppx, operatorAddress } from "./config.js";
 import { initUsers, users, getUser, publicUser, reloadUsers } from "./users.js";
 import {
@@ -33,6 +33,8 @@ import {
   fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
+import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
+import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, syncCheckoutSession } from "./stripe.js";
 import {
   userInsert, userUpdateProfile, type CampaignRow,
   followInsert, followRemove, isFollowing, followersOf, followingOf,
@@ -73,8 +75,7 @@ async function enrichCampaign(camp: CampaignRow): Promise<Campaign> {
   const spentUsd = ledger.spentOn(camp.id);
   const remainingUsd = +(Number(camp.maxBudget) - spentUsd).toFixed(6);
   const company = getUser(camp.ownerId);
-  let advertiserBalance = 0;
-  try { if (company) advertiserBalance = await pathUsdBalance(company.address); } catch { /* RPC hiccup — show 0 */ }
+  const advertiserBalance = company ? getAppBalance(company.id) : 0;
   const { videoPath, ...pub } = camp;
   return { ...pub, spentUsd, remainingUsd, advertiserBalance, funded: remainingUsd >= Number(camp.pricePerSec) };
 }
@@ -146,6 +147,11 @@ app.get("/net", (c) => {
   const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
   return c.json(ledger.snapshot(address));
 });
+app.get("/api/balance", (c) => {
+  const user = getUser(String(c.req.query("as") ?? ""));
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  return c.json(getLedgerSnapshot(user.id));
+});
 app.post("/reset", (c) => {
   ledger.reset();
   return c.json({ ok: true });
@@ -196,6 +202,47 @@ app.post("/demo/fund", async (c) => {
     return c.json({ error: (e as Error).message }, 500);
   }
 });
+
+app.post("/api/stripe/create-topup-checkout-session", async (c) => {
+  try {
+    const b = await c.req.json().catch(() => ({}));
+    const user = getUser(String(b?.as ?? ""));
+    if (!user) return c.json({ error: "unauthorized" }, 401);
+    const amount = resolveTopupAmount(b);
+    const session = await createTopupCheckoutSession(user.id, amount);
+    return c.json({ url: session.url, sessionId: session.id });
+  } catch (e) {
+    const message = (e as Error).message;
+    const status = message.includes("STRIPE_SECRET_KEY") ? 503 : 400;
+    console.error("[stripe] create checkout failed:", message);
+    return c.json({ error: message }, status as any);
+  }
+});
+
+app.post("/api/stripe/sync-checkout-session", async (c) => {
+  try {
+    const b = await c.req.json().catch(() => ({}));
+    const user = getUser(String(b?.as ?? ""));
+    if (!user) return c.json({ error: "unauthorized" }, 401);
+    const sessionId = String(b?.sessionId ?? "");
+    return c.json(await syncCheckoutSession(sessionId, user.id));
+  } catch (e) {
+    console.error("[stripe] sync checkout failed:", (e as Error).message);
+    return c.json({ error: "checkout sync failed" }, 400);
+  }
+});
+
+app.post("/api/stripe/webhook", async (c) => {
+  try {
+    const signature = c.req.header("stripe-signature");
+    const rawBody = Buffer.from(await c.req.arrayBuffer());
+    const result = await handleStripeWebhook(rawBody, signature);
+    return c.json(result);
+  } catch (e) {
+    console.error("[stripe] webhook failed:", (e as Error).message);
+    return c.json({ error: "webhook verification failed" }, 400);
+  }
+});
 /** Register a connected Tempo account (login with your own wallet).
  *  Every connected wallet is FULL-ACCESS — it can watch, create + upload, launch
  *  ads, and earn from ads. Launching ads needs the app to pay viewers FROM the
@@ -203,31 +250,35 @@ app.post("/demo/fund", async (c) => {
  *  stored server-side for that purpose. ⚠️ TESTNET ONLY — never a mainnet key. */
 app.post("/users", async (c) => {
   const b = await c.req.json().catch(() => ({}));
-  const address = String(b?.address ?? "");
+  const providedAddress = String(b?.address ?? "");
+  const generated = providedAddress ? undefined : createWallet();
+  const address = providedAddress || generated!.address;
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return c.json({ error: "bad address" }, 400);
   const role = ["viewer", "creator", "advertiser", "admin"].includes(b?.role) ? b.role : "creator";
-  const id = `me-${address.slice(2, 10).toLowerCase()}`;
+  const id = b?.handle ? `me-${String(b.handle).toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32)}` : `me-${address.slice(2, 10).toLowerCase()}`;
   // Store the key whenever a valid one is provided (enables wallet-funded ad payouts).
-  const key = (typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : "";
-  const user = { id, name: String(b?.name ?? "My Wallet"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: "🪪", address: address as `0x${string}`, key: key as `0x${string}` };
+  const key = (typeof b?.key === "string" && /^0x[0-9a-fA-F]{64}$/.test(b.key)) ? b.key : (generated?.privateKey ?? "");
+  const user = {
+    id, name: String(b?.name ?? "My Account"), role: role as any, handle: String(b?.handle ?? `you-${address.slice(2, 6)}`), avatar: "🪪",
+    address: address as `0x${string}`, key: key as `0x${string}`,
+    internalWalletId: `iw_${id}`, tempoWalletId: address,
+  };
   userInsert(user);
   reloadUsers();
   return c.json({ user: publicUser(user) });
 });
 
-/** Live on-chain pathUSD balance for a user/address. */
+/** App balance from confirmed internal ledger transactions. */
 app.get("/balance", async (c) => {
   const as = c.req.query("as");
-  const address = c.req.query("address") ?? (as ? getUser(as)?.address : undefined);
-  if (!address) return c.json({ error: "no address" }, 400);
-  return c.json({ address, balance: await pathUsdBalance(address as `0x${string}`) });
+  const user = as ? getUser(as) : undefined;
+  if (!user) return c.json({ error: "no user" }, 400);
+  return c.json({ balance: getAppBalance(user.id), currency: "usd" });
 });
 
 /** Admin: list all users with live on-chain balances. */
 app.get("/admin/users", async (c) => {
-  const rows = await Promise.all(
-    users.map(async (u) => ({ ...publicUser(u), balance: await pathUsdBalance(u.address) })),
-  );
+  const rows = users.map((u) => ({ ...publicUser(u), balance: getAppBalance(u.id) }));
   return c.json({ users: rows });
 });
 
@@ -242,8 +293,7 @@ app.get("/users/:id/profile", async (c) => {
   const folRows = followingOf(user.id);
   const supporters = supRows.map((f) => { const u = getUser(f.follower); return u ? { ...publicUser(u), amountUsd: f.amountUsd, since: f.createdAt } : null; }).filter(Boolean);
   const following = folRows.map((f) => { const u = getUser(f.creator); return u ? { ...publicUser(u), amountUsd: f.amountUsd, since: f.createdAt } : null; }).filter(Boolean);
-  let balance = 0;
-  try { balance = await pathUsdBalance(user.address); } catch { /* RPC hiccup */ }
+  const balance = getAppBalance(user.id);
   return c.json({
     user: publicUser(user),
     balance,
@@ -456,12 +506,8 @@ app.post("/campaigns/:id/fund", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const addUsd = Number(b?.amountUsd) > 0 ? Number(b.amountUsd) : 0.2;
   const company = getUser(camp.ownerId);
-  let balance = 0;
-  let tx: string | undefined;
-  if (company) {
-    try { tx = (await fundWallet(company.address, "5")) ?? undefined; } catch { /* faucet busy — budget still raised */ }
-    try { balance = await pathUsdBalance(company.address); } catch { /* ignore */ }
-  }
+  const balance = company ? getAppBalance(company.id) : 0;
+  const tx: string | undefined = undefined;
   const maxBudget = fundCampaign(id, addUsd);
   return c.json({ ok: true, id, maxBudget, balance, tx });
 });
@@ -521,6 +567,50 @@ app.post("/attention/:campaignId/:viewerId/stop", (c) =>
   (stopRequested.add(`${c.req.param("campaignId")}:${c.req.param("viewerId")}`), c.json({ ok: true })),
 );
 
+app.get("/api/watch/:id", async (c) => {
+  const clip = getClip(c.req.param("id"));
+  if (!clip) return c.json({ error: "not found" }, 404);
+  const viewer = getUser(c.req.query("as") ?? "");
+  if (!viewer) return c.json({ error: "unauthorized" }, 401);
+  const origin = c.req.header("origin") ?? "*";
+  stopRequested.delete(`app:${clip.id}:${viewer.id}`);
+  const pricePerSec = Number(clip.pricePerSec);
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    async start(controller) {
+      try {
+        for (let second = 1; second <= clip.durationSec; second++) {
+          if (stopRequested.has(`app:${clip.id}:${viewer.id}`) || stopRequested.has(clip.id)) {
+            stopRequested.delete(`app:${clip.id}:${viewer.id}`);
+            stopRequested.delete(clip.id);
+            controller.close();
+            return;
+          }
+          const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
+          if (!charged.ok) {
+            controller.enqueue(encoder.encode(JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance }) + "\n"));
+            controller.close();
+            return;
+          }
+          ledger.record({ fromAddr: viewer.address, toAddr: clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator }) + "\n"));
+          await sleep(1000);
+        }
+        controller.close();
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+  });
+  return new Response(body, {
+    headers: {
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-cache",
+      "access-control-allow-origin": origin,
+    },
+  });
+});
+
 // ── Direction A: watch a creator clip (Viewer → Creator) ────────────────────
 app.on(["GET", "POST"], "/watch/:id", async (c) => {
   const clip = getClip(c.req.param("id"));
@@ -554,6 +644,13 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
         if (stopRequested.has(clip.id)) {
           stopRequested.delete(clip.id);
           return;
+        }
+        if (viewer) {
+          const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
+          if (!charged.ok) {
+            yield JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance });
+            return;
+          }
         }
         await stream.charge();
         ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
@@ -606,8 +703,7 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
         yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "budget" });
         return;
       }
-      let advBalance = Number.POSITIVE_INFINITY;
-      try { if (company) advBalance = await pathUsdBalance(company.address); } catch { /* RPC hiccup → trust the channel */ }
+      const advBalance = company ? getAppBalance(company.id) : 0;
       if (advBalance < pricePerSec) {
         yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "wallet" });
         return;
@@ -635,6 +731,7 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
         if (attention.isAttentionFresh(campaign.id, viewer.id)) {
           await stream.charge(); // pulls pathUSD from the advertiser's channel/wallet
           paid = +(paid + pricePerSec).toFixed(6);
+          await creditAdReward(viewer.id, 1, `${campaign.id}:${viewer.id}:${Math.floor(Date.now() / 1000)}`, { campaignId: campaign.id, rewardPerSecond: pricePerSec, advertiserId: company?.id });
           ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });
           yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, remainingUsd: campaignRemaining(campaign), advertiser: campaign.advertiser, viewer: viewer.id });
         } else {
