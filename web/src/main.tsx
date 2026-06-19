@@ -303,18 +303,53 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   const [paying, setPaying] = useState(false);
   const [started, setStarted] = useState(false); // payment channel open + actually paying
   const [events, setEvents] = useState<NetSnapshot["events"]>([]);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fsControls, setFsControls] = useState(true);
   const baseline = useRef<number | null>(null);
   const prev = useRef(0);
   const video = useRef<HTMLVideoElement | null>(null);
   const player = useRef<HTMLDivElement | null>(null);
+  const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const token = useRef<string | undefined>(undefined); // per-session token (Layer 3)
   const startWatch = () => { baseline.current = null; prev.current = 0; setEarned(0); setStarted(false); setAttention(true); setWatching(true); };
   const toggleAdPlayback = () => {
     if (!watching) { startWatch(); return; }
     if (funded) setAttention((a) => !a);
   };
+  function revealFsControls() {
+    if (!fullscreen) return;
+    setFsControls(true);
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    hideFsTimer.current = setTimeout(() => setFsControls(false), 1800);
+  }
+  async function openFullscreen(e: MouseEvent) {
+    e.stopPropagation();
+    setFullscreen(true);
+    setFsControls(true);
+    await player.current?.requestFullscreen?.().catch(() => {});
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    hideFsTimer.current = setTimeout(() => setFsControls(false), 1800);
+  }
+  async function closeFullscreen(e?: MouseEvent) {
+    e?.stopPropagation();
+    setFullscreen(false);
+    setFsControls(true);
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  }
   // Truly leaving (Stop / navigate away) closes the channel → advertiser refunded.
   useEffect(() => () => { stopAd(ad.id, me.id); }, [ad.id, me.id]);
+  useEffect(() => {
+    const onFullScreenChange = () => { if (!document.fullscreenElement) setFullscreen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
+    document.addEventListener("fullscreenchange", onFullScreenChange);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullScreenChange);
+      document.removeEventListener("keydown", onKey);
+      if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    };
+  }, []);
 
   // Mirror live attention inputs into refs so the 1s heartbeat reads fresh values
   // without re-subscribing every toggle.
@@ -409,11 +444,28 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
       <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back to ads</button><span className="muted">earning from an ad</span></div>
       <div className="watch">
         <div>
-          <div className="player ad click-player" ref={player} onClick={toggleAdPlayback} title={!watching ? "click to start" : attention ? "click to pause" : "click to resume"}>
+          <div
+            className={"player ad click-player" + (fullscreen ? " player-fullscreen" : "")}
+            ref={player}
+            onClick={toggleAdPlayback}
+            onMouseMove={revealFsControls}
+            title={!watching ? "click to start" : attention ? "click to pause" : "click to resume"}
+          >
             {ad.hasVideo
               ? <video ref={video} src={videoSrc(ad.id)} loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
+            <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
+            {fullscreen && (
+              <div className={"fs-layer" + (fsControls ? " show" : "")}>
+                <button className="fs-back" onClick={closeFullscreen}>← Back</button>
+                <div className="fs-cost fs-earn">
+                  <span>earned</span>
+                  <b>+ {usd(earned)}</b>
+                  <small>{usd(price)}/sec · {paying ? "paying" : watching ? "ready" : "paused"}</small>
+                </div>
+              </div>
+            )}
             {!watching
               ? <div className="ov ov-watch"><button className="btn btn-lg" onClick={(e) => { e.stopPropagation(); startWatch(); }}>▶ Watch ad</button><div className="muted" style={{ marginTop: 10 }}>or click the video · get paid {usd(price)}/sec</div></div>
               : !funded
