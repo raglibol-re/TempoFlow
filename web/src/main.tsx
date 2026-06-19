@@ -1493,7 +1493,7 @@ function FlowCounter({ label, amount, dir, sub }: { label: string; amount: numbe
  * the amount — so optimizing the (fakeable) attention signal can't raise the price.
  */
 function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void }) {
-  const [phase, setPhase] = useState<"idle" | "running" | "settling" | "done">("idle");
+  const [phase, setPhase] = useState<"idle" | "starting" | "running" | "settling" | "done">("idle");
   const [out, setOut] = useState(0);          // paid to creator this session (watch tick)
   const [inUsd, setInUsd] = useState(0);       // earned from the ad (on-chain /net delta)
   const [clearing, setClearing] = useState(0); // live market price €/s (auction clearing)
@@ -1514,8 +1514,10 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
   const visRef = useRef(visible); visRef.current = visible;
   const scrRef = useRef(onScreen); scrRef.current = onScreen;
   const adRef = useRef<Campaign | null>(null); adRef.current = ad;
+  const activeRef = useRef(false); // true between start() and stop()/unmount — guards async setters
   const running = phase === "running";
-  const net = +(inUsd - out).toFixed(6);
+  // Freeze the net at settlement so it doesn't flicker after the streams stop.
+  const net = settlement ? +(settlement.earned - settlement.paid).toFixed(6) : +(inUsd - out).toFixed(6);
   // The ad reward only ACCRUES while attention is verified (binary gate). The PRICE
   // (clearing) is independent of this — see §A2.
   const gateOpen = running && attention && visible && onScreen;
@@ -1531,10 +1533,11 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
     const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.3), { threshold: [0, 0.3, 1] });
     io.observe(el); return () => io.disconnect();
   }, []);
-  useEffect(() => () => { handle.current?.stop().catch(() => {}); if (adRef.current) stopAd(adRef.current.id, me.id); }, [me.id]);
+  useEffect(() => () => { activeRef.current = false; handle.current?.stop().catch(() => {}); const a = adRef.current; if (a) stopAd(a.id, me.id); }, [me.id]);
 
   /** Re-clear the per-second attention auction: real funded-campaign bids + a couple of
-   *  simulated competing advertiser agents so the market visibly moves. Second-price. */
+   *  simulated competing advertiser agents so the market visibly moves. Second-price.
+   *  §A2: the price depends ONLY on advertiser bids + time — never on viewer attention. */
   async function refreshMarket() {
     try {
       const a = await runAuction(me.id);
@@ -1547,33 +1550,38 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
       const sims = Array.from({ length: simCount }, (_, i) => +(base * (0.55 + 0.8 * Math.abs(Math.sin(t / 2.5 + i * 1.7)))).toFixed(6));
       const all = [...realBids, ...sims].sort((x, y) => y - x);
       const clear = (all.length >= 2 ? all[1] : all[0]) ?? a.reserveUsd ?? 0.0006; // second-price clearing
-      setClearing(+clear.toFixed(6)); setBidders(all.length);
-      if (a.winner && !adRef.current) setAd(a.winner);
+      if (activeRef.current) { setClearing(+clear.toFixed(6)); setBidders(all.length); if (a.winner && !adRef.current) setAd(a.winner); }
       return a.winner ?? null;
     } catch { return adRef.current; }
   }
 
   async function start() {
-    if (running) return;
-    setPhase("running"); setOut(0); setInUsd(0); setSettlement(null); inBaseline.current = null; setAttention(true);
+    if (phase === "running" || phase === "starting") return;
+    activeRef.current = true;
+    setPhase("starting"); setOut(0); setInUsd(0); setSettlement(null); setChallenge(null); setAttention(true);
+    inBaseline.current = null; token.current = undefined;
     const winner = await refreshMarket();
+    if (!activeRef.current) return; // stopped/unmounted mid-await
     const theAd = winner ?? adRef.current;
-    if (!theAd) { onError("No funded ad is bidding right now — fund an ad in the Ad Studio first."); setPhase("idle"); return; }
+    if (!theAd) { onError("No funded ad is bidding right now — fund an ad in the Ad Studio first."); activeRef.current = false; setPhase("idle"); return; }
     setAd(theAd);
     // OUT — pay the creator per second (real on-chain MPP).
     try {
       handle.current = await watchClip(clip, me,
-        (t: Tick) => { setOut(t.spentUsd); video.current?.play().catch(() => {}); },
+        (tk: Tick) => { setOut(tk.spentUsd); video.current?.play().catch(() => {}); },
         () => {});
-    } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); return; }
+    } catch (e: any) { onError(e?.message ?? String(e)); activeRef.current = false; setPhase("idle"); return; }
+    if (!activeRef.current) { handle.current?.stop().catch(() => {}); handle.current = null; return; }
     // IN — open the attention session; the advertiser agent pays per verified second.
     token.current = await openAttentionSession(theAd.id, me.id, clearing || undefined);
     runAd(theAd.id, me.id);
+    if (!activeRef.current) return;
+    setPhase("running"); // heartbeat/net/auction effects start ONLY now — channel + token ready
   }
 
   // Heartbeat (attention proof) + keep the advertiser agent alive, while running.
   useEffect(() => {
-    if (!running || !ad) return;
+    if (!running || !ad || !handle.current) return;
     let alive = true;
     const beat = async () => {
       const v = video.current;
@@ -1589,14 +1597,15 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
   // Poll on-chain net → IN delta since the session started (authoritative, on-chain).
   useEffect(() => {
     if (!running) return;
+    let alive = true;
     const id = setInterval(async () => {
       try {
         const n = await fetchNet(me.id);
         if (inBaseline.current == null) inBaseline.current = n.inUsd;
-        setInUsd(+(n.inUsd - (inBaseline.current ?? 0)).toFixed(6));
+        if (alive) setInUsd(+(n.inUsd - (inBaseline.current ?? 0)).toFixed(6));
       } catch { /* keep last */ }
     }, 1500);
-    return () => clearInterval(id);
+    return () => { alive = false; clearInterval(id); };
   }, [running, me.id]);
 
   // §A: re-clear the auction every ~3s so the price visibly moves with competition.
@@ -1613,15 +1622,17 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
   }, [gateOpen]);
 
   async function stop() {
-    if (!running) return;
+    if (phase !== "running" && phase !== "starting") return;
+    activeRef.current = false;
     setPhase("settling");
     let txHash: string | undefined, refund = 0;
     try {
       const sum = await handle.current?.stop();      // settle viewer→creator channel on-chain
       txHash = sum?.txHash; refund = Math.max(0, 0.5 - (sum?.spentUsd ?? out)); // unused viewer deposit
     } catch (e: any) { onError(e?.message ?? String(e)); }
-    if (ad) await stopAd(ad.id, me.id);              // close ad channel → advertiser refunded
     handle.current = null;
+    const a = adRef.current; if (a) await stopAd(a.id, me.id); // close ad channel → advertiser refunded
+    token.current = undefined; inBaseline.current = null;
     setSettlement({ paid: out, earned: inUsd, refund, txHash });
     setPhase("done");
   }
@@ -1636,10 +1647,10 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
         <div className="flow-net">
           <div className="flow-counter-label">net balance</div>
           <div className="flow-net-num" style={{ color: net >= 0 ? "var(--in)" : "var(--out)" }}>{net >= 0 ? "+" : "−"} ${Math.abs(net).toFixed(4)}</div>
-          <div className="flow-counter-sub muted">{running ? "watching costs ≈ €0 net" : phase === "done" ? "session settled on-chain" : "press start"}</div>
+          <div className="flow-counter-sub muted">{running ? "watching costs ≈ €0 net" : phase === "starting" ? "opening channels…" : phase === "settling" ? "settling on-chain…" : phase === "done" ? "session settled on-chain" : "press start"}</div>
         </div>
         <FlowCounter label="↗ from advertiser / sec" dir="in" amount={inUsd} sub={
-          <span className="agent-overlay">🤖 {bidders || 1} agents bidding · clearing <b style={{ color: "var(--in)" }}>{usd(clearing)}/s</b> {gateOpen ? "→ settled" : ""}</span>
+          <span className="agent-overlay">🤖 {bidders || 1} agents bidding <span style={{ opacity: .65 }}>(real + simulated)</span> · clearing <b style={{ color: "var(--in)" }}>{usd(clearing)}/s</b> {gateOpen ? "→ settled" : ""}</span>
         } />
       </div>
 
@@ -1665,7 +1676,7 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
             )}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            attention = <b>binary gate</b> (verified ✓/✗) · price = <b>live market</b> (advertiser bids){" "}
+            attention = <b>binary gate</b> (verified ✓/✗) · price = <b>live market</b> (real + simulated advertiser bids){" "}
             <button className="linkbtn" onClick={() => setAttention((a) => !a)}>{attention ? "look away" : "look back"}</button>
           </div>
         </div>
@@ -1674,6 +1685,8 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
       <div className="flow-controls">
         {phase === "idle" || phase === "done"
           ? <button className="btn btn-lg" onClick={start}>▶ Start flow session</button>
+          : phase === "starting"
+          ? <button className="btn btn-lg" disabled>opening channels…</button>
           : <button className="btn btn-lg btn-ghost" onClick={stop} disabled={phase === "settling"}>{phase === "settling" ? "settling on-chain…" : "■ Stop & settle"}</button>}
       </div>
 
