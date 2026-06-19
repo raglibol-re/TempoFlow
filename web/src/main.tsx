@@ -695,6 +695,7 @@ function PopularityTimeline({
       onClick={(e) => { e.stopPropagation(); onSeek(timeFromEvent(e)); }}
       onMouseMove={handleMove}
       onMouseLeave={() => setHover(null)}
+      tabIndex={0}
       role="slider"
       aria-label="Video timeline"
       aria-valuemin={0}
@@ -856,7 +857,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             {clip.hasVideo
               ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
-            <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
+            <button className="fs-open" onClick={openFullscreen} title="fullscreen" aria-label="Open fullscreen">⛶</button>
             {clip.live && <span className="live-badge player-live">● LIVE</span>}
             {fullscreen && (
               <div className={"fs-layer" + (fsControls ? " show" : "")}>
@@ -1098,7 +1099,7 @@ function AdWatch({ ad, me, onBack, onProfile, rewardRate }: { ad: Campaign; me: 
               ? <video ref={video} src={videoSrc(ad.id)} preload="metadata" loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
-            <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
+            <button className="fs-open" onClick={openFullscreen} title="fullscreen" aria-label="Open fullscreen">⛶</button>
             {fullscreen && (
               <div className={"fs-layer" + (fsControls ? " show" : "")}>
                 <button className="fs-back" onClick={closeFullscreen}>← Back</button>
