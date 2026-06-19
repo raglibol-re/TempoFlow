@@ -17,7 +17,7 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  sendTip, runAuction, matchAd, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -622,6 +622,64 @@ function LiveChat({ clipId, me }: { clipId: string; me: DemoUser }) {
 
 const LOW_CAP = 0.012;
 
+/** Autonomous interest-matching ad agent (DETERMINISTIC — no API key). While you watch,
+ *  it reads what you're into (the clip's tags), auto-picks the funded ad that best
+ *  matches, and pays YOU per verified second of attention — settled on-chain. The
+ *  self-financing feed, run by a machine: no human chooses the ad, no LLM key needed. */
+function AdAgentPanel({ clip, me, onEarned, active }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; active: boolean }) {
+  const [ad, setAd] = useState<Campaign | null>(null);
+  const [reason, setReason] = useState("reading your interests…");
+  const [earned, setEarned] = useState(0);
+  const [visible, setVisible] = useState(true);
+  const [onScreen, setOnScreen] = useState(true);
+  const box = useRef<HTMLDivElement | null>(null);
+  const token = useRef<string | undefined>(undefined);
+  const baseline = useRef<number | null>(null);
+  const visRef = useRef(visible); visRef.current = visible;
+  const scrRef = useRef(onScreen); scrRef.current = onScreen;
+  const earning = !!ad && active && visible && onScreen;
+
+  // The agent's decision: match an ad to this clip's interests.
+  useEffect(() => {
+    let on = true;
+    matchAd(clip.tags ?? []).then((m) => { if (on) { setAd(m.match); setReason(m.match ? m.reason : "no funded ad is bidding right now"); } });
+    return () => { on = false; };
+  }, [clip.id]);
+  useEffect(() => { const f = () => setVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", f); f(); return () => document.removeEventListener("visibilitychange", f); }, []);
+  useEffect(() => { const el = box.current; if (!el || typeof IntersectionObserver === "undefined") return; const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.25), { threshold: [0, 0.25, 1] }); io.observe(el); return () => io.disconnect(); }, [ad?.id]);
+  // The agent autonomously pays you: open attention session, prove attention, the
+  // advertiser agent settles per second; poll on-chain earnings. Gated on `active`
+  // (the watch payment is flowing) so the two MPP channels open one-after-another
+  // instead of fighting over the rate-limited RPC.
+  useEffect(() => {
+    if (!ad || !active) return;
+    let alive = true; baseline.current = null;
+    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
+    const beat = () => { void sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current, playing: true, onScreen: scrRef.current }); };
+    beat(); const beatId = setInterval(beat, 1000);
+    const pumpId = setInterval(() => { if (visRef.current && scrRef.current) runAd(ad.id, me.id); }, 4000); runAd(ad.id, me.id);
+    const netId = setInterval(async () => {
+      try { const n = await fetchNet(me.id); if (baseline.current == null) baseline.current = n.inUsd; const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6); if (alive) { setEarned(e); onEarned(e); } } catch { /* keep last */ }
+    }, 1500);
+    return () => { alive = false; clearInterval(beatId); clearInterval(pumpId); clearInterval(netId); stopAd(ad.id, me.id); };
+  }, [ad?.id, me.id, active]);
+
+  return (
+    <div className="panel agent-panel" ref={box}>
+      <div className="agent-head">🤖 Your ad agent <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>· autonomous · no API key</span></div>
+      {ad ? (<>
+        <div className="agent-ad">
+          {ad.hasVideo ? <video src={videoSrc(ad.id)} preload="metadata" autoPlay loop muted playsInline /> : <span className="emoji" style={{ fontSize: 40 }}>{ad.thumb ?? "📣"}</span>}
+          <span className="adtag">● AD</span>
+        </div>
+        <div className="muted" style={{ fontSize: 12 }}>matched <b>{ad.title ?? ad.advertiser}</b> — {reason}</div>
+        <div className="bignum in" style={{ fontSize: 26 }}>+ {usd(earned)}</div>
+        <div className="muted" style={{ fontSize: 11.5 }}>{!active ? "starts paying once your watch session is live…" : earning ? "paying you per verified second → settled on-chain" : "keep the ad on screen to keep earning"}</div>
+      </>) : <div className="muted" style={{ fontSize: 12.5 }}>{reason}</div>}
+    </div>
+  );
+}
+
 function formatTime(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
   const m = Math.floor(safe / 60);
@@ -734,6 +792,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [popularity, setPopularity] = useState<SecondPopularity[]>([]);
   const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
   const [streamEnded, setStreamEnded] = useState(false); // live host left
+  const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
   const [summary, setSummary] = useState<CloseSummary | null>(null);
   const [low, setLow] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -894,13 +953,18 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
           {clip.live ? <div style={{ marginTop: 14 }}><LiveChat clipId={clip.id} me={me} /></div> : <SocialBar clip={clip} me={me} />}
         </div>
 
-        {/* payment panel */}
+        {/* payment + autonomous ad-agent sidebar */}
+        <div className="watch-side">
         <div className="panel">
           <h3><span className={"livedot" + (live ? " on" : "")} /> pay-per-second → creator</h3>
           {clip.live && <LiveMeter clipId={clip.id} onEnded={() => { setStreamEnded(true); if (handle.current) void closeOut("ended"); }} />}
           <div className="bignum out">− {usd(spent)}</div>
           <div className="statline"><span className="k">rate</span><span>{usd(Number(clip.pricePerSec))}/sec</span></div>
           <div className="statline"><span className="k">watched</span><span>{secs}s</span></div>
+          {!clip.live && <>
+            <div className="statline"><span className="k">earned back by agent</span><span style={{ color: "var(--in)" }}>+ {usd(earned)}</span></div>
+            <div className="statline"><span className="k">net this session</span><span><b style={{ color: earned - spent >= 0 ? "var(--in)" : "var(--out)" }}>{earned - spent >= 0 ? "+" : "−"} {usd(Math.abs(earned - spent))}</b>{Math.abs(earned - spent) < 0.012 ? " · ≈ free" : ""}</span></div>
+          </>}
           <div>
             <div className="statline" style={{ marginBottom: 5 }}><span className="k">channel deposit</span><span>{usd(spent)} / {usd(deposit)}</span></div>
             <div className="bar"><i style={{ width: pct + "%" }} /></div>
@@ -929,6 +993,8 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               </div>
             );
           })()}
+        </div>
+        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} active={phase === "watching" || phase === "paused"} />}
         </div>
       </div>
     </div>
@@ -2049,9 +2115,7 @@ function App() {
   const activeAd = adCampaign ? campaigns.find((c) => c.id === adCampaign) ?? null : null;
   // Every logged-in wallet is full-access: watch, create + upload, advertise, earn.
   const nav: [string, string][] = [
-    ["home", "Home"],
-    ["flow", "⚡ Live Saldo"],
-    ["earn", "Earn from ads"],
+    ["home", "Watch"],
     ["studio", "Creator Studio"],
     ["campaigns", "Advertise"],
     ["ledger", "Ledger"],
@@ -2098,20 +2162,16 @@ function App() {
 
       {view === "ledger"
         ? <TransparencyView me={me} onBack={() => go("home")} />
-        : view === "flow" && (current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])
-        ? <FlowSession key="flow" clip={(current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])!} me={me} onBack={() => go("home")} onError={setError} />
         : view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
         : view === "watch" && current
         ? (current.live && current.ownerId === me.id
             ? <HostLiveView key={current.id} clip={current} me={me} onBack={() => go("home")} onEnded={() => { go("home"); refreshFeed(); }} />
             : <WatchView key={current.id} clip={current} me={me} balance={balance} onTopup={() => setTopupOpen(true)} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />)
-        : view === "earn" && activeAd
-        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} rewardRate={auctionRate} onBack={() => { setAdCampaign(null); setAuctionRate(null); }} onProfile={openProfile} />
         : (
           <div className="page">
             {view === "home" && (<>
-              <ConceptHero onTry={() => go("flow")} />
+              <ConceptHero onTry={() => { const c = feed.find((x) => x.hasVideo && !x.live) ?? feed[0]; if (c) { setCurrent(c); setView("watch"); } }} />
               <div className="section-title">Browse creators — you pay per second only while watching</div>
               {feed.length ? <div className="grid">{feed.map((c) => <VideoCard key={c.id} clip={c} owner={userById(c.ownerId)} onProfile={openProfile} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">loading feed…</div>}
             </>)}
