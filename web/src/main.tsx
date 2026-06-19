@@ -7,7 +7,7 @@
 import "./tailwind.css";
 import "./styles.css";
 import { StrictMode, useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { SparklesCore } from "@/components/ui/sparkles";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
@@ -1405,6 +1405,230 @@ function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => voi
   );
 }
 
+// ───────────────────────── §2 Live-Saldo + §5 agent + §A dynamic pricing ─────
+/** Big animated money counter (sub-cent precision so it's obvious this needs Tempo). */
+function FlowCounter({ label, amount, dir, sub }: { label: string; amount: number; dir: "in" | "out" | "net"; sub?: ReactNode }) {
+  const color = dir === "in" ? "var(--in)" : dir === "out" ? "var(--out)" : amount >= 0 ? "var(--in)" : "var(--out)";
+  const sign = dir === "out" ? "−" : dir === "in" ? "+" : amount >= 0 ? "+" : "−";
+  return (
+    <div className={"flow-counter flow-" + dir}>
+      <div className="flow-counter-label">{label}</div>
+      <div className="flow-counter-num" style={{ color }}>{sign} ${Math.abs(amount).toFixed(4)}</div>
+      {sub && <div className="flow-counter-sub">{sub}</div>}
+    </div>
+  );
+}
+
+/**
+ * THE pitch screen. A creator video plays (money streams OUT per second) WHILE an ad
+ * runs alongside and pays the viewer per VERIFIED second (money IN) — the net balance
+ * hovers around zero. Both are real on-chain MPP. The right (IN) side is driven by an
+ * autonomous advertiser agent whose per-second price is the live CLEARING PRICE of a
+ * per-second second-price auction between competing advertiser agents (§5 + §A).
+ *
+ * GUARDRAIL (§A2): the price floats ONLY on the demand side (competing advertiser
+ * bids). The viewer's attention is a BINARY GATE — it unlocks payment but never sets
+ * the amount — so optimizing the (fakeable) attention signal can't raise the price.
+ */
+function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void }) {
+  const [phase, setPhase] = useState<"idle" | "running" | "settling" | "done">("idle");
+  const [out, setOut] = useState(0);          // paid to creator this session (watch tick)
+  const [inUsd, setInUsd] = useState(0);       // earned from the ad (on-chain /net delta)
+  const [clearing, setClearing] = useState(0); // live market price €/s (auction clearing)
+  const [bidders, setBidders] = useState(0);   // active advertiser agents bidding
+  const [ad, setAd] = useState<Campaign | null>(null);
+  const [attention, setAttention] = useState(true); // manual look-away
+  const [visible, setVisible] = useState(true);
+  const [onScreen, setOnScreen] = useState(true);
+  const [challenge, setChallenge] = useState<AttentionChallenge | null>(null);
+  const [settlement, setSettlement] = useState<{ paid: number; earned: number; refund: number; txHash?: string } | null>(null);
+
+  const handle = useRef<WatchHandle | null>(null);
+  const token = useRef<string | undefined>(undefined);
+  const inBaseline = useRef<number | null>(null);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const adBox = useRef<HTMLDivElement | null>(null);
+  const attRef = useRef(attention); attRef.current = attention;
+  const visRef = useRef(visible); visRef.current = visible;
+  const scrRef = useRef(onScreen); scrRef.current = onScreen;
+  const adRef = useRef<Campaign | null>(null); adRef.current = ad;
+  const running = phase === "running";
+  const net = +(inUsd - out).toFixed(6);
+  // The ad reward only ACCRUES while attention is verified (binary gate). The PRICE
+  // (clearing) is independent of this — see §A2.
+  const gateOpen = running && attention && visible && onScreen;
+
+  // Layer 1a: tab visibility. Layer 1b: ad box on-screen.
+  useEffect(() => {
+    const f = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", f); f();
+    return () => document.removeEventListener("visibilitychange", f);
+  }, []);
+  useEffect(() => {
+    const el = adBox.current; if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.3), { threshold: [0, 0.3, 1] });
+    io.observe(el); return () => io.disconnect();
+  }, []);
+  useEffect(() => () => { handle.current?.stop().catch(() => {}); if (adRef.current) stopAd(adRef.current.id, me.id); }, [me.id]);
+
+  /** Re-clear the per-second attention auction: real funded-campaign bids + a couple of
+   *  simulated competing advertiser agents so the market visibly moves. Second-price. */
+  async function refreshMarket() {
+    try {
+      const a = await runAuction(me.id);
+      const realBids = a.bids.filter((b) => b.funded).map((b) => b.bidUsd);
+      // MOCK: simulated competing advertiser agents (1–3) so the clearing price moves on
+      // screen. Their bids oscillate over TIME — never on the viewer's attention (§A2).
+      const t = performance.now() / 1000;
+      const simCount = 1 + Math.round(1 + Math.sin(t / 6));
+      const base = a.winner ? Number(a.winner.pricePerSec) : a.reserveUsd || 0.0006;
+      const sims = Array.from({ length: simCount }, (_, i) => +(base * (0.55 + 0.8 * Math.abs(Math.sin(t / 2.5 + i * 1.7)))).toFixed(6));
+      const all = [...realBids, ...sims].sort((x, y) => y - x);
+      const clear = (all.length >= 2 ? all[1] : all[0]) ?? a.reserveUsd ?? 0.0006; // second-price clearing
+      setClearing(+clear.toFixed(6)); setBidders(all.length);
+      if (a.winner && !adRef.current) setAd(a.winner);
+      return a.winner ?? null;
+    } catch { return adRef.current; }
+  }
+
+  async function start() {
+    if (running) return;
+    setPhase("running"); setOut(0); setInUsd(0); setSettlement(null); inBaseline.current = null; setAttention(true);
+    const winner = await refreshMarket();
+    const theAd = winner ?? adRef.current;
+    if (!theAd) { onError("No funded ad is bidding right now — fund an ad in the Ad Studio first."); setPhase("idle"); return; }
+    setAd(theAd);
+    // OUT — pay the creator per second (real on-chain MPP).
+    try {
+      handle.current = await watchClip(clip, me,
+        (t: Tick) => { setOut(t.spentUsd); video.current?.play().catch(() => {}); },
+        () => {});
+    } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); return; }
+    // IN — open the attention session; the advertiser agent pays per verified second.
+    token.current = await openAttentionSession(theAd.id, me.id, clearing || undefined);
+    runAd(theAd.id, me.id);
+  }
+
+  // Heartbeat (attention proof) + keep the advertiser agent alive, while running.
+  useEffect(() => {
+    if (!running || !ad) return;
+    let alive = true;
+    const beat = async () => {
+      const v = video.current;
+      const playing = !!v && !v.paused && !v.ended;
+      const res = await sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current && attRef.current, playing, onScreen: scrRef.current });
+      if (alive) setChallenge(res?.challenge ?? null);
+    };
+    beat(); const beatId = setInterval(beat, 1000);
+    const pumpId = setInterval(() => { if (attRef.current && visRef.current && scrRef.current) runAd(ad.id, me.id); }, 4000);
+    return () => { alive = false; clearInterval(beatId); clearInterval(pumpId); };
+  }, [running, ad?.id, me.id]);
+
+  // Poll on-chain net → IN delta since the session started (authoritative, on-chain).
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(async () => {
+      try {
+        const n = await fetchNet(me.id);
+        if (inBaseline.current == null) inBaseline.current = n.inUsd;
+        setInUsd(+(n.inUsd - (inBaseline.current ?? 0)).toFixed(6));
+      } catch { /* keep last */ }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [running, me.id]);
+
+  // §A: re-clear the auction every ~3s so the price visibly moves with competition.
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => { void refreshMarket(); }, 3000);
+    return () => clearInterval(id);
+  }, [running, me.id]);
+
+  // Play the ad only while the gate is open (verified attention).
+  useEffect(() => {
+    const v = video.current; if (!v) return;
+    if (gateOpen) v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+  }, [gateOpen]);
+
+  async function stop() {
+    if (!running) return;
+    setPhase("settling");
+    let txHash: string | undefined, refund = 0;
+    try {
+      const sum = await handle.current?.stop();      // settle viewer→creator channel on-chain
+      txHash = sum?.txHash; refund = Math.max(0, 0.5 - (sum?.spentUsd ?? out)); // unused viewer deposit
+    } catch (e: any) { onError(e?.message ?? String(e)); }
+    if (ad) await stopAd(ad.id, me.id);              // close ad channel → advertiser refunded
+    handle.current = null;
+    setSettlement({ paid: out, earned: inUsd, refund, txHash });
+    setPhase("done");
+  }
+
+  return (
+    <div className="page">
+      <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back</button><span className="muted">Live balance · the self-financing feed</span></div>
+
+      {/* THE money line: three live counters, net hovers around zero */}
+      <div className="flow-saldo">
+        <FlowCounter label="↘ to creator / sec" dir="out" amount={out} sub={<span className="muted">{usd(Number(clip.pricePerSec))}/s · watchtime</span>} />
+        <div className="flow-net">
+          <div className="flow-counter-label">net balance</div>
+          <div className="flow-net-num" style={{ color: net >= 0 ? "var(--in)" : "var(--out)" }}>{net >= 0 ? "+" : "−"} ${Math.abs(net).toFixed(4)}</div>
+          <div className="flow-counter-sub muted">{running ? "watching costs ≈ €0 net" : phase === "done" ? "session settled on-chain" : "press start"}</div>
+        </div>
+        <FlowCounter label="↗ from advertiser / sec" dir="in" amount={inUsd} sub={
+          <span className="agent-overlay">🤖 {bidders || 1} agents bidding · clearing <b style={{ color: "var(--in)" }}>{usd(clearing)}/s</b> {gateOpen ? "→ settled" : ""}</span>
+        } />
+      </div>
+
+      <div className="flow-stage">
+        {/* creator video — money OUT */}
+        <div className="flow-pane">
+          <div className="player">
+            {clip.hasVideo ? <video ref={video} src={videoSrc(clip.id)} loop playsInline muted={false} /> : <span className="emoji">{clip.thumb ?? "🎬"}</span>}
+            <span className="badge" style={{ background: "var(--out)" }}>↘ paying creator</span>
+          </div>
+          <div className="w-title" style={{ fontSize: 15 }}>{clip.title}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>@{clip.creator}</div>
+        </div>
+
+        {/* ad — money IN, gated on verified attention */}
+        <div className="flow-pane" ref={adBox}>
+          <div className="player ad" style={{ opacity: gateOpen ? 1 : 0.5 }}>
+            {ad?.hasVideo ? <video src={videoSrc(ad.id)} loop muted playsInline autoPlay /> : <span className="emoji">{ad?.thumb ?? "📣"}</span>}
+            <span className="adtag">● AD</span>
+            {running && !gateOpen && <div className="ov" style={{ fontSize: 13 }}>{!visible ? "🛑 tab hidden — paused" : !onScreen ? "⬆️ scroll ad into view" : "🙈 paused — click to resume"}</div>}
+            {challenge && gateOpen && (
+              <button className="att-challenge" style={{ left: challenge.x + "%", top: challenge.y + "%" }} onClick={(e) => { e.stopPropagation(); setChallenge(null); void answerChallenge(ad!.id, me.id, token.current, challenge.id); }}>👀 tap to keep earning</button>
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            attention = <b>binary gate</b> (verified ✓/✗) · price = <b>live market</b> (advertiser bids){" "}
+            <button className="linkbtn" onClick={() => setAttention((a) => !a)}>{attention ? "look away" : "look back"}</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flow-controls">
+        {phase === "idle" || phase === "done"
+          ? <button className="btn btn-lg" onClick={start}>▶ Start flow session</button>
+          : <button className="btn btn-lg btn-ghost" onClick={stop} disabled={phase === "settling"}>{phase === "settling" ? "settling on-chain…" : "■ Stop & settle"}</button>}
+      </div>
+
+      {settlement && (
+        <div className="receipt" style={{ marginTop: 16, maxWidth: 560, marginInline: "auto" }}>
+          <div className="receipt-head">✓ Session settled on-chain (Tempo)</div>
+          <div className="statline"><span className="k">paid to creator</span><span style={{ color: "var(--out)" }}>− {usd(settlement.paid)}</span></div>
+          <div className="statline"><span className="k">earned from ads</span><span style={{ color: "var(--in)" }}>+ {usd(settlement.earned)}</span></div>
+          <div className="statline"><span className="k">net cost to watch</span><span><b>{settlement.earned - settlement.paid >= 0 ? "+" : "−"} {usd(Math.abs(settlement.earned - settlement.paid))}</b></span></div>
+          <div className="statline"><span className="k">unused deposit refunded</span><span style={{ color: "var(--in)" }}>↩ {usd(settlement.refund)}</span></div>
+          {settlement.txHash && <div className="statline"><span className="k">settlement tx</span><a className="mono" href={explorerTxUrl(settlement.txHash)} target="_blank" rel="noreferrer">{settlement.txHash.slice(0, 12)}…↗</a></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [users, setUsers] = useState<DemoUser[]>([]);
   const [me, setMe] = useState<DemoUser | null>(null);
@@ -1566,6 +1790,7 @@ function App() {
   // Every logged-in wallet is full-access: watch, create + upload, advertise, earn.
   const nav: [string, string][] = [
     ["home", "Home"],
+    ["flow", "⚡ Live Saldo"],
     ["studio", "Studio"],
     ["earn", "Earn"],
     ["campaigns", "Ads"],
@@ -1610,7 +1835,9 @@ function App() {
       {paymentNotice && <div className="page" style={{ paddingBottom: 0 }}><div className="receipt">{paymentNotice}<button className="btn-ghost btn btn-sm" onClick={() => setPaymentNotice(null)}>×</button></div></div>}
       {topupOpen && <TopupModal me={me} onClose={() => setTopupOpen(false)} onError={setError} />}
 
-      {view === "profile" && profileId
+      {view === "flow" && (current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])
+        ? <FlowSession key="flow" clip={(current ?? feed.find((c) => c.hasVideo && !c.live) ?? feed[0])!} me={me} onBack={() => go("home")} onError={setError} />
+        : view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
         : view === "watch" && current
         ? (current.live && current.ownerId === me.id
