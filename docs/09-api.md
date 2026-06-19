@@ -15,6 +15,16 @@
 | `/attention/session` | POST | free | — | `{campaignId, viewer}` → opens an attention session, returns `{token}`. Every heartbeat must carry this token (**Layer 3** binding) | no |
 | `/heartbeat` | POST | free | — | `{campaignId, viewer, token, visible, playing, onScreen}` → records a heartbeat; only refreshes attention when signals pass (**L1**: `visible` + `onScreen`; `playing` advisory) + token matches (**L3**) + no challenge overdue (**L2**). Returns `{ok, paused, reason?, challenge}` | no |
 | `/attention/answer` | POST | free | — | `{campaignId, viewer, token, challengeId}` → answers the outstanding **Layer 2** challenge; resumes payment immediately | no |
+| `/attention/session` *(updated)* | POST | free | — | now also accepts optional `rewardRate` — the auction **clearing price** the viewer should EARN (capped at the campaign's bid). Set by the auction flow | no |
+| `/tip` | POST | free | — | **Feature 1.** `{as, clipId, amountUsd}` → debits viewer app credit, credits the creator, records a net flow. Called once/sec while "boost" is on, or one-shot | no |
+| `/auction/run` | POST | free | — | **Feature 2.** `{viewer}` → runs a second-price (Vickrey) auction over funded campaigns → `{winner, clearingUsd, reserveUsd, bids[]}` | no |
+| `/ask/:creatorId` | POST (NDJSON) | `$0.0008`/token | **Creator** | **Feature 3.** `{as, question}` → streams a Claude answer token-by-token; bills the viewer per token, splits to the creator. Lines: `{type:"start"\|"token"\|"done"\|"out-of-balance"\|"error", …}`. Falls back to a canned stream with no `ANTHROPIC_API_KEY` | yes (`x-payment-info`, `unitType:"token"`) |
+| `/live/start` | POST | free | — | **Feature 5.** `{as, title, tags?, pricePerSec?}` → creates a LIVE clip (looping source) → `{clip}` | no |
+| `/live/:id/stop` | POST | free | — | `{as}` (owner) → ends the stream (clears the live flag + meter) | no |
+| `/live/:id/cheer` | POST | free | — | 👏 → `{applause}` (cumulative) | no |
+| `/live/:id/stats` | GET | free | — | `{live, viewers, perSecUsd, totalUsd, applause}` — shared real-time audience meter | no |
+| `/goals` | GET / POST | free | — | **Feature 4.** GET `?creator=&viewer=` → goals (lazily resolved). POST `{as, title, targetUsd, minutes?}` → create a funding goal | no |
+| `/goals/:id/pledge` | POST | free | — | `{as, amountUsd}` → escrows the pledge (debits backer). Auto-captures to the creator when the target is met; auto-refunds all pledges if the deadline passes unmet | no |
 | `/feed` | GET | free | — | list clips (all channels) | no |
 | `/campaigns` | GET | free | — | list ad campaigns | no |
 | `/users` | GET | free | — | public user list (no keys) — roles: viewer/creator/advertiser/admin | no |

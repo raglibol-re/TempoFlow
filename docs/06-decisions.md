@@ -134,3 +134,40 @@ build prompt or from the MPP docs.
   `/heartbeat`, `/attention/answer`, SSE gate), `web/src/flow.ts` + `web/src/main.tsx`
   (signals, challenge overlay), `server/src/attention-spike.ts` (updated to the new protocol).
 - **Date:** 2026-06-19
+
+## ADR-011 — Five per-second-native features routed through the app-ledger
+- **Decision:** Add five features that each apply the per-second / escrow-refund primitive
+  to a new surface — **live tip boost**, a **second-price attention auction**, **pay-per-token
+  creator AI**, **escrowed crowdfund goals**, and **live streaming with a shared meter**.
+  Money for the new flows moves through the **app-ledger** (`appDebit`/`appCredit`, SQLite)
+  plus a `ledger.record` net-flow entry, rather than opening a fresh on-chain MPP channel
+  per flow.
+- **Alternatives:** (a) open a real mppx session/channel for every new flow (tips, AI tokens,
+  pledges); (b) build each on the in-memory net ledger only (no spendable balance).
+- **Rationale:** the app already settled the *spendable* balance through the app-ledger
+  (Stripe top-ups bridged to pathUSD, `/api/watch`, ad rewards), and MPP channel-open is the
+  flakiest part of the stack (DEV-H/L). Routing new flows through the same custodial ledger
+  is reliable, keeps balances consistent across features, and still records the visible net
+  flow. The original two directions (`/watch`, `/attention`) keep their real MPP channels —
+  this is additive, not a replacement.
+- **Auction design:** **Vickrey (second-price)** — the highest funded bid wins the slot but
+  the viewer earns the *second-highest* bid (floored at the attention reserve). The clearing
+  rate is carried on the attention session (`openSession(..., rewardRate)`, capped at the
+  winner's bid) so the existing `/attention` SSE credits it without a parallel reward path.
+  Second-price makes truthful bidding optimal, so the "transparent attention market" is real.
+- **Creator AI:** streams the **real Claude API** (`server/src/ask.ts`, via `fetch` — no SDK
+  dependency added) token-by-token with `unitType: "token"`; bills per ~4-char token and
+  splits to the creator. Falls back to a canned local stream when `ANTHROPIC_API_KEY` is
+  absent, so the per-token paywall demos fully offline.
+- **Crowdfund:** pledges are escrowed (debited up front) and **lazily resolved** on read —
+  captured to the creator when the target is met, refunded to all backers once the deadline
+  passes. No cron; resolution happens whenever a goal is fetched or pledged to.
+- **Live:** simulated (a looping source), with per-viewer presence registered by the existing
+  per-second watch loop and an in-memory room aggregating viewers / combined $-sec / cheers.
+- **Touches:** `shared/src/types.ts` (`Goal`, `AuctionResult`, `LiveStats`, `Clip.live`),
+  `shared/src/currency.ts` (`askPerToken`), `server/src/db.ts` (`goals`/`pledges` tables,
+  `clips.live`), `server/src/app-ledger.ts` (`appDebit`/`appCredit`), `server/src/{auction,ask,live}.ts`
+  (new), `server/src/attention.ts` (`rewardRate`), `server/src/index.ts` (routes + discovery),
+  `web/src/flow.ts` + `web/src/main.tsx` + `web/src/styles.css` (UI for all five).
+- **Status:** all workspaces typecheck; DB DDL + goal/pledge helpers smoke-tested.
+- **Date:** 2026-06-19

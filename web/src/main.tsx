@@ -915,6 +915,19 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
 
       {toast && <div className="receipt" style={{ marginTop: 14 }}>{toast}</div>}
 
+      {(() => {
+        const goals = p.goals ?? [];
+        const active = goals.find((g) => g.status === "active");
+        const recent = active ?? goals[0];
+        return (
+          <div className="profile-extra">
+            <AskCreatorBox creator={u} me={me} onBalance={onBalance} />
+            {recent && <GoalCard goal={recent} me={me} isMe={isMe} onChanged={() => { load(); onBalance(); }} onError={onError} />}
+            {isMe && !active && <CreateGoalForm me={me} onCreated={load} onError={onError} />}
+          </div>
+        );
+      })()}
+
       <div className="ptabs">
         {(["videos", "supporters", "following"] as const).map((t) => (
           <button key={t} className={"ptab" + (tab === t ? " on" : "")} onClick={() => setTab(t)}>

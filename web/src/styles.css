@@ -175,6 +175,46 @@ select.input { appearance: none; }
   box-shadow: 0 0 0 6px rgba(43,217,160,.18), 0 6px 22px rgba(0,0,0,.45); animation: att-pulse 1s ease-in-out infinite; }
 .att-challenge:hover { filter: brightness(1.06); }
 @keyframes att-pulse { 0%,100% { box-shadow: 0 0 0 5px rgba(43,217,160,.16), 0 6px 22px rgba(0,0,0,.45); } 50% { box-shadow: 0 0 0 12px rgba(43,217,160,.05), 0 6px 22px rgba(0,0,0,.45); } }
+
+/* ── Feature 1: tip boost ── */
+.tipbox { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; background: #160f1f; }
+.tip-head { font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.tip-total { color: var(--in); font-size: 12px; font-weight: 700; }
+.tip-quick { display: flex; gap: 6px; }
+.tip-quick .btn { flex: 1; }
+.tip-boost { display: flex; flex-direction: column; gap: 6px; }
+.tip-boost-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tip-boost-opts .chip { cursor: pointer; border: 1px solid var(--border); }
+
+/* ── Feature 5: live meter ── */
+.live-badge { background: var(--out); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .5px; padding: 2px 8px; border-radius: 6px; box-shadow: 0 0 10px rgba(255,93,115,.6); animation: live-blink 1.4s ease-in-out infinite; }
+.player-live { position: absolute; top: 8px; left: 8px; z-index: 2; }
+@keyframes live-blink { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.livemeter { border: 1px solid rgba(255,93,115,.4); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; background: rgba(255,93,115,.06); margin-bottom: 4px; }
+.live-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.cheer-btn { align-self: flex-start; margin-top: 4px; }
+
+/* ── Feature 2: attention auction ── */
+.auction { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: linear-gradient(180deg,#171326,#11101a); }
+.auction-head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+.bidbook { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.bidrow { display: flex; justify-content: space-between; padding: 8px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 13.5px; }
+.bidrow.win { border-color: var(--in); background: rgba(43,217,160,.08); font-weight: 700; }
+.bidrow.dim { opacity: .5; }
+.auction-win { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: rgba(43,217,160,.07); border: 1px solid rgba(43,217,160,.35); }
+.auction-banner { background: rgba(43,217,160,.1); border: 1px solid rgba(43,217,160,.35); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; }
+
+/* ── Feature 4: crowdfund goals ── */
+.profile-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+@media (max-width: 760px) { .profile-extra { grid-template-columns: 1fr; } }
+.goalcard, .askbox { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface); }
+.goal-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* ── Feature 3: ask creator AI ── */
+.ask-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ask-answer { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #0f141f; border: 1px solid #22304a; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
+.ask-caret { animation: live-blink 1s steps(2) infinite; }
+.golive-card { border-left: 3px solid var(--out); }
 .badge.in-badge { background: rgba(43,217,160,.92); color: #04190f; }
 .vthumb .ov { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 10px; background: rgba(0,0,0,.62); font-weight: 600; color: #fff; }
 .adrow { display: flex; align-items: center; gap: 14px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); border-left: 3px solid var(--out); }

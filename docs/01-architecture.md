@@ -108,12 +108,37 @@ ignored ads.** This is what makes "ads pay you" real instead of farmable.
 > *scripted* gaming expensive. Hardening would mean server-rendered challenge content
 > (answer requires decoding pixels) or signed client attestation. See [ADR-010](06-decisions.md).
 
+## Per-second-native features (same primitive, new surfaces)
+
+Five features extend the two money directions, all reusing the same idea — *stream value
+in tiny units, settle/refund trustlessly*. To stay reliable in a demo room they move money
+through the **app-ledger** (`server/src/app-ledger.ts`: `appDebit`/`appCredit`, SQLite) and
+record a flow in the **net ledger** (`ledger.record`, what the live receipts/pills show) —
+the same path the custodial `/api/watch` and Stripe top-ups already use. See [ADR-011](06-decisions.md).
+
+- **Live tip boost** (`POST /tip`, `server/src/index.ts`): per-second (or one-shot) tip
+  Viewer → Creator, layered on the watch stream.
+- **Attention auction** (`POST /auction/run`, `server/src/auction.ts`): a **second-price
+  (Vickrey)** auction over funded campaigns — highest bid wins the slot, viewer earns the
+  *second* price. The clearing rate is threaded into the attention session
+  (`openSession(..., rewardRate)`) so the existing `/attention` SSE credits it.
+- **Ask a creator's AI** (`POST /ask/:creatorId`, `server/src/ask.ts`): streams a real
+  Claude answer token-by-token (`unitType: "token"`), billing the viewer per token and
+  crediting the creator; falls back to a canned local stream with no `ANTHROPIC_API_KEY`.
+- **Crowdfund goals** (`/goals`, `server/src/index.ts` + `goals`/`pledges` tables): pledges
+  are escrowed (debited up front) and **lazily resolved** — captured to the creator once the
+  target is met, or refunded to backers once the deadline passes.
+- **Go live** (`/live/*`, `server/src/live.ts`): a creator starts a live clip (looping
+  source); the per-second watch loop registers presence so a **shared in-memory meter**
+  aggregates concurrent viewers, combined `$/sec`, total, and 👏 cheers across everyone.
+
 ## Net balance & discovery
 
 - The viewer's **net balance** rises while watching ads, falls while watching creators —
   shown live. Narrative: _attention to ads finances the creator feed_.
-- `GET /openapi.json` (discovery) advertises creator streams and ad campaigns with
-  `x-payment-info`, so the **agents** can find content and campaigns automatically.
+- `GET /openapi.json` (discovery) advertises creator streams, ad campaigns, and the
+  per-token creator-AI endpoint with `x-payment-info`, so the **agents** can find paid
+  content automatically.
 
 ## Multi-user model (YouTube/Twitch-style)
 

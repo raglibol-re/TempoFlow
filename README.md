@@ -47,6 +47,22 @@ The layers stack: 1 stops casual gaming, 2 forces real attention, 3 stops script
 abuse. **Demo-grade, not Sybil-proof** — Layer 1 signals are client-reported. See
 [docs/01-architecture.md](docs/01-architecture.md) and [ADR-010](docs/06-decisions.md).
 
+## More ways the money flows (per-second native features)
+
+Every feature below is the same primitive — **stream value in tiny units, settle/refund
+trustlessly** — applied to a different surface. See [ADR-011](docs/06-decisions.md).
+
+| Feature | What it does | The MPP angle |
+|---|---|---|
+| **Live tip boost** | While watching a creator, stream an extra `$X/sec` tip on top of watchtime (or quick one-tap tips). | Per-second value transfer, layered on the existing watch stream. |
+| **Attention auction** | Advertisers bid for your attention; the **highest bid wins** the slot but you're paid the **second-highest price** (Vickrey). | A real, transparent price-discovery market on attention — honest bidding is optimal. |
+| **Ask a creator's AI** | Chat a creator's AI persona, billed **per generated token**, revenue split to the creator. | `unitType: "token"` — the machine-payments story (real Claude API streaming, falls back to a canned answer offline). |
+| **Crowdfund goals** | Back a creator's funding goal; pledges are **escrowed** and only captured if the goal is reached, else **auto-refunded** at the deadline. | Trustless Kickstarter on the escrow + refund primitive. |
+| **Go live** | Creators stream live; every viewer pays per second and a **shared real-time meter** shows concurrent watchers, combined `$/sec`, and 👏 cheers. | Many simultaneous per-second payers into one aggregated audience. |
+
+Find them in the app: **Earn → ⚡ Live attention auction**; the **watch page** (tip boost; live
+meter on live streams); **Studio → 🔴 Go live**; and any **creator profile** (Ask-AI box + funding goal).
+
 ## Why only on Tempo
 
 Thousands of **sub-cent payments per second**, to **many recipients**, with **instant
@@ -113,6 +129,7 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 - ✅ Skip / attention-loss stops payment instantly and refunds unused deposit
 - ✅ Viewer net balance rises from ads, falls from creators — live
 - ✅ Three-layer attention proof (passive signals + random tap challenge + session-bound heartbeats) prevents paying for ignored or scripted ads
+- ✅ Per-second-native features: live tip boost, second-price attention auction, pay-per-token creator AI, escrowed crowdfund goals, and live streaming with a shared audience meter
 - ✅ Curator + Advertiser agents run autonomously with spend controls + on-chain settle
 - ✅ `/openapi.json` discovery present and valid (`mppx discover validate`)
 - ✅ Receipts / live flow feed in the UI

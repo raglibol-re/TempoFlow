@@ -206,11 +206,13 @@ app.post("/demo/fund", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const user = getUser(String(b?.userId ?? ""));
   if (!user) return c.json({ error: "unknown user" }, 400);
-  // Testnet faucet → REAL on-chain pathUSD only (no fake credit). The displayed
-  // balance is the wallet's actual on-chain pathUSD.
+  // Credit the SPENDABLE app balance (this is what watch/tip/ask/pledge debit) — do
+  // this first so funding always works even if the testnet faucet is slow/down.
+  const { balance } = appCredit(user.id, 5, "demo_faucet");
+  // Best-effort: also top up the real on-chain pathUSD wallet (so MPP channels +
+  // on-chain settlement have funds). Never fail the request if the faucet hiccups.
   let tx: string | null = null;
-  try { tx = await fundWallet(user.address, "5"); } catch (e) { return c.json({ error: (e as Error).message }, 500); }
-  const balance = await pathUsdBalance(user.address);
+  try { tx = await fundWallet(user.address, "5"); } catch { /* faucet busy — app credit still applied */ }
   return c.json({ ok: true, tx, balance });
 });
 
@@ -604,13 +606,19 @@ app.get("/api/watch/:id", async (c) => {
             controller.close();
             return;
           }
-          const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
-          if (!charged.ok) {
-            controller.enqueue(encoder.encode(JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance }) + "\n"));
-            controller.close();
-            return;
+          const isOwner = viewer.id === clip.ownerId; // creators preview their own clips/streams free
+          if (!isOwner) {
+            const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
+            if (!charged.ok) {
+              controller.enqueue(encoder.encode(JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance }) + "\n"));
+              controller.close();
+              return;
+            }
+            appCredit(clip.ownerId, pricePerSec, "watch_earning", { clipId: clip.id, viewerId: viewer.id }); // creator earns
+            ledger.record({ fromAddr: viewer.address, toAddr: clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
+            if (clip.live) live.liveAddPaid(clip.id, pricePerSec);
           }
-          ledger.record({ fromAddr: viewer.address, toAddr: clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
+          if (clip.live && !isOwner) live.liveBeat(clip.id, viewer.id); // count paying viewers in the shared meter
           controller.enqueue(encoder.encode(JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator }) + "\n"));
           await sleep(1000);
         }
