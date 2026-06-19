@@ -75,7 +75,21 @@ export const createCampaign = (as: string, tags: string[]) => jpost("/campaigns"
 /** Fund an ad: tops up the advertiser wallet (faucet) + raises the budget cap. */
 export const fundCampaign = (campaignId: string, amountUsd = 0.2) => jpost(`/campaigns/${campaignId}/fund`, { amountUsd }, "fund ad");
 export const resetNet = () => jpost("/reset", {}, "reset").catch(() => {});
-export const sendHeartbeat = (campaignId: string, viewer: string) => jpost("/heartbeat", { campaignId, viewer }, "heartbeat").catch(() => {});
+/** A challenge the viewer must answer to prove they're watching (Layer 2). */
+export interface AttentionChallenge { id: string; x: number; y: number; answerMs: number }
+export interface HeartbeatResult { ok: boolean; paused?: boolean; reason?: string; challenge: AttentionChallenge | null }
+/** Open an attention session → token every heartbeat must carry (Layer 3). */
+export const openAttentionSession = (campaignId: string, viewer: string) =>
+  jpost("/attention/session", { campaignId, viewer }, "open attention session").then((j) => j.token as string).catch(() => undefined);
+/** Send a heartbeat with the session token + live attention signals (Layer 1).
+ *  Returns the server's verdict, including any challenge to render (Layer 2). */
+export const sendHeartbeat = (
+  campaignId: string, viewer: string,
+  token: string | undefined, signals: { visible: boolean; playing: boolean; onScreen: boolean },
+) => jpost("/heartbeat", { campaignId, viewer, token, ...signals }, "heartbeat").catch(() => ({ ok: false, challenge: null })) as Promise<HeartbeatResult>;
+/** Tap the challenge target → echoes its id back so payment resumes. */
+export const answerChallenge = (campaignId: string, viewer: string, token: string | undefined, challengeId: string) =>
+  jpost("/attention/answer", { campaignId, viewer, token, challengeId }, "answer challenge").catch(() => ({ ok: false }));
 export const runAd = (campaignId: string, viewerId: string) => jpost("/demo/run-ad", { campaignId, viewerId }, "start advertiser").catch(() => {});
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;

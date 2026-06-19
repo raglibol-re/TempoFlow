@@ -38,6 +38,7 @@ import {
   followerCount, followingCount, followEarnings,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
+import * as attention from "./attention.js";
 
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
 const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
@@ -439,20 +440,38 @@ app.post("/campaigns/:id/fund", async (c) => {
   return c.json({ ok: true, id, maxBudget, balance, tx });
 });
 
-// ── Attention heartbeats (gate input) ───────────────────────────────────────
-const HEARTBEAT_TTL_MS = 2500;
-const lastHeartbeat = new Map<string, number>();
-const hbKey = (campaignId: string, viewer?: string) => `${campaignId}:${viewer ?? "*"}`;
-function attentionFresh(campaignId: string, viewer?: string): boolean {
-  const ts = lastHeartbeat.get(hbKey(campaignId, viewer)) ?? lastHeartbeat.get(hbKey(campaignId));
-  return ts != null && Date.now() - ts <= HEARTBEAT_TTL_MS;
-}
+// ── Attention proofing (gate input) ─────────────────────────────────────────
+// Open a session → returns the token every heartbeat must carry (L3 binding).
+app.post("/attention/session", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const campaignId = String(b?.campaignId ?? "");
+  const viewer = String(b?.viewer ?? "");
+  if (!getCampaign(campaignId) || !getUser(viewer)) return c.json({ error: "bad campaignId/viewer" }, 400);
+  return c.json(attention.openSession(campaignId, viewer));
+});
+
+// Heartbeat: carries the session token (L3) + live attention signals (L1). The
+// response may hand back a CHALLENGE (L2) the client must render and answer.
 app.post("/heartbeat", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const campaignId = b?.campaignId ?? c.req.query("campaignId");
   const viewer = b?.viewer ?? c.req.query("viewer");
-  if (campaignId) lastHeartbeat.set(hbKey(campaignId, viewer), Date.now());
-  return c.json({ ok: true });
+  if (!campaignId || !viewer) return c.json({ ok: false, reason: "no-session", challenge: null });
+  return c.json(
+    attention.heartbeat(String(campaignId), String(viewer), b?.token, {
+      visible: b?.visible,
+      playing: b?.playing,
+      onScreen: b?.onScreen,
+    }),
+  );
+});
+
+// Answer the outstanding challenge → payment resumes immediately.
+app.post("/attention/answer", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const campaignId = String(b?.campaignId ?? "");
+  const viewer = String(b?.viewer ?? "");
+  return c.json(attention.answer(campaignId, viewer, b?.token, String(b?.challengeId ?? "")));
 });
 
 /** Demo convenience: have the campaign's company pay this viewer in-browser
@@ -578,7 +597,7 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
           yield JSON.stringify({ type: "budget-exhausted", campaignId: campaign.id, paidUsd: paid });
           return;
         }
-        if (attentionFresh(campaign.id, viewer.id)) {
+        if (attention.isAttentionFresh(campaign.id, viewer.id)) {
           await stream.charge(); // pulls pathUSD from the advertiser's channel/wallet
           paid = +(paid + pricePerSec).toFixed(6);
           ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });

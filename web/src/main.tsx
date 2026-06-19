@@ -11,9 +11,9 @@ import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, watchClip,
-  videoSrc, connectTempoAccount, createCampaign,
+  videoSrc, connectTempoAccount, createCampaign, openAttentionSession, answerChallenge,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot,
+  type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser,
 } from "./flow";
 
@@ -235,7 +235,10 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
  *  The money is pulled automatically from the advertiser's wallet (server-spawned
  *  payer); when the ad's funded budget runs out it simply stops paying. */
 function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; onBack: () => void; onProfile?: (id: string) => void }) {
-  const [attention, setAttention] = useState(true);
+  const [attention, setAttention] = useState(true); // manual "look away" toggle
+  const [visible, setVisible] = useState(true); // tab foregrounded (Layer 1)
+  const [onScreen, setOnScreen] = useState(true); // player in viewport (Layer 1)
+  const [challenge, setChallenge] = useState<AttentionChallenge | null>(null); // active proof (Layer 2)
   const [earned, setEarned] = useState(0);
   const [paying, setPaying] = useState(false);
   const [started, setStarted] = useState(false); // payment channel open + actually paying
@@ -243,14 +246,53 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   const baseline = useRef<number | null>(null);
   const prev = useRef(0);
   const video = useRef<HTMLVideoElement | null>(null);
+  const player = useRef<HTMLDivElement | null>(null);
+  const token = useRef<string | undefined>(undefined); // per-session token (Layer 3)
 
-  // Drive attention: heartbeats gate the payout; runAd spawns the advertiser payer.
+  // Mirror live attention inputs into refs so the 1s heartbeat reads fresh values
+  // without re-subscribing every toggle.
+  const attRef = useRef(attention); attRef.current = attention;
+  const visRef = useRef(visible); visRef.current = visible;
+  const scrRef = useRef(onScreen); scrRef.current = onScreen;
+
+  // Layer 1a: tab visibility.
   useEffect(() => {
-    const beat = setInterval(() => { if (attention) sendHeartbeat(ad.id, me.id); }, 1000);
-    const pump = setInterval(() => { if (attention) runAd(ad.id, me.id); }, 4000);
-    if (attention) { sendHeartbeat(ad.id, me.id); runAd(ad.id, me.id); }
-    return () => { clearInterval(beat); clearInterval(pump); };
-  }, [attention, ad.id, me.id]);
+    const f = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", f); f();
+    return () => document.removeEventListener("visibilitychange", f);
+  }, []);
+
+  // Layer 1b: is the player actually on-screen?
+  useEffect(() => {
+    const el = player.current; if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.4), { threshold: [0, 0.4, 1] });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // Open a session, then heartbeat every second with REAL signals (Layer 1) +
+  // the session token (Layer 3). The server's reply may carry a challenge (L2).
+  useEffect(() => {
+    let alive = true;
+    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
+    const beat = async () => {
+      const v = video.current;
+      const playing = !!v && !v.paused && !v.ended && v.readyState >= 2;
+      // Manual "look away" collapses into the visibility signal.
+      const res = await sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current && attRef.current, playing, onScreen: scrRef.current });
+      if (alive) setChallenge(res?.challenge ?? null);
+    };
+    const beatId = setInterval(beat, 1000);
+    const pumpId = setInterval(() => { if (attRef.current && visRef.current && scrRef.current) runAd(ad.id, me.id); }, 4000);
+    beat(); runAd(ad.id, me.id);
+    return () => { alive = false; clearInterval(beatId); clearInterval(pumpId); };
+  }, [ad.id, me.id]);
+
+  // Layer 2: prove you're watching by tapping the target → payment resumes.
+  const proveAttention = (id: string) => {
+    setChallenge(null); // optimistic; the next heartbeat confirms
+    void answerChallenge(ad.id, me.id, token.current, id);
+  };
 
   // Poll my on-chain earnings → delta since this ad opened. The first non-zero
   // earning means the advertiser's payment channel is open AND paying.
@@ -273,7 +315,8 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   const spent = ad.spentUsd ?? 0;
   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
   const funded = ad.funded ?? budget - spent >= price;
-  const live = attention && started && funded; // channel open, paying, attentive
+  // Channel open, funded, AND provably attentive (manual + tab visible + on-screen).
+  const live = attention && started && funded && visible && onScreen;
 
   // Play the ad ONLY while it's actually being paid for. Try with sound; if the
   // browser blocks unmuted autoplay, fall back to muted so it still plays.
@@ -297,18 +340,30 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
       <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back to ads</button><span className="muted">earning from an ad</span></div>
       <div className="watch">
         <div>
-          <div className="player ad">
+          <div className="player ad" ref={player}>
             {ad.hasVideo
-              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
+              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline controls style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
             {!funded
               ? <div className="ov">⛔ This ad is out of funding — it can’t pay, so it won’t play.</div>
               : !attention
               ? <div className="ov">🙈 looked away — paused, you’re not earning</div>
+              : !visible
+              ? <div className="ov">🛑 tab in the background — attention can’t be proven, paused</div>
+              : !onScreen
+              ? <div className="ov">⬆️ scroll the ad back into view to keep earning</div>
               : !started
               ? <div className="ov">⏳ opening payment channel on Tempo… the ad starts when the money does (~3–6s)</div>
               : null}
+            {/* Layer 2: random attention challenge — tap it within a few seconds. */}
+            {challenge && funded && started && (
+              <button
+                className="att-challenge"
+                style={{ left: challenge.x + "%", top: challenge.y + "%" }}
+                onClick={() => proveAttention(challenge.id)}
+              >👀 still watching? tap to keep earning</button>
+            )}
           </div>
           <div className="w-title">{ad.title ?? ad.advertiser}</div>
           <div className="w-chan">
@@ -343,7 +398,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
             <button className={attention ? "btn btn-ghost" : "btn"} style={{ flex: 1 }} onClick={() => setAttention((a) => !a)}>{attention ? "Look away 🙈" : "Look back 👀"}</button>
             <button className="btn btn-ghost" onClick={onBack}>Stop</button>
           </div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{!funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !started ? "⏳ opening payment channel — the ad starts once you’re being paid" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{!funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !visible ? "🛑 background tab — paused, come back to keep earning" : !onScreen ? "⬆️ ad scrolled off-screen — paused" : challenge ? "👀 tap the prompt to prove you’re watching" : !started ? "⏳ opening payment channel — the ad starts once you’re being paid" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
         </div>
       </div>
     </div>
