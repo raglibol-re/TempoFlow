@@ -326,45 +326,38 @@ export async function watchClip(
   clip: Clip, me: DemoUser, onTick: (t: Tick) => void,
   onEnd: (reason: "ended" | "out-of-funds") => void, maxDeposit = "0.5",
 ): Promise<WatchHandle> {
-  void maxDeposit;
-  const controller = new AbortController();
-  const res = await fetch(`${SERVER_URL}/api/watch/${clip.id}?as=${me.id}`, { signal: controller.signal });
-  if (!res.ok || !res.body) throw new Error(`start stream for "${clip.title}" failed: HTTP ${res.status}`);
+  // REAL on-chain payment: open an MPP payment channel from the viewer's wallet and
+  // stream pathUSD to the creator per second. Closing settles on Tempo and refunds
+  // the unspent deposit. (No off-chain ledger — the chain IS the money.)
+  const mgr = manager(me, maxDeposit);
+  let stream: AsyncIterable<string>;
+  try {
+    stream = await mgr.sse(`${SERVER_URL}/watch/${clip.id}?as=${me.id}`);
+  } catch (e: any) {
+    throw new Error(`open payment channel for "${clip.title}" failed: ${e?.message ?? e}`);
+  }
   const drained = (async () => {
     try {
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const t = JSON.parse(line);
-            if (t?.type === "out-of-balance") { onEnd("out-of-funds"); controller.abort(); return; }
-            if (t?.second) onTick(t as Tick);
-          } catch { /* keep-alive */ }
-        }
+      for await (const data of stream) {
+        try { const t = JSON.parse(data) as Tick; if (t?.second) onTick(t); } catch { /* keep-alive */ }
       }
       onEnd("ended");
     } catch {
-      // mid-stream failure (e.g. funds/voucher cap reached) → funding stopped
-      onEnd("out-of-funds");
+      onEnd("out-of-funds"); // channel ran dry / closed
     }
   })();
   return {
     async stop() {
-      controller.abort();
       try { await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" }); }
       catch (e: any) { throw new Error(`stop failed: ${e?.message ?? e}`); }
       await drained;
+      let receipt: any;
+      try { receipt = await mgr.close(); } catch (e: any) { throw new Error(`settle/refund failed: ${e?.message ?? e}`); }
       return {
-        spentUsd: undefined,
-        seconds: undefined,
+        spentUsd: rawToUsd(receipt?.spent),
+        seconds: typeof receipt?.units === "number" ? receipt.units : undefined,
+        txHash: receipt?.txHash,
+        channelId: receipt?.channelId ?? receipt?.reference,
       };
     },
   };

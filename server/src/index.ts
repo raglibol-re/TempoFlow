@@ -671,15 +671,7 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
           stopRequested.delete(clip.id);
           return;
         }
-        if (viewer) {
-          const charged = await chargeForStreamingSeconds(viewer.id, 1, { clipId: clip.id, pricePerSecond: pricePerSec, creatorId: clip.ownerId });
-          if (!charged.ok) {
-            yield JSON.stringify({ type: "out-of-balance", clipId: clip.id, reason: charged.reason, balance: charged.balance });
-            return;
-          }
-        }
-        await stream.charge();
-        if (viewer) await appCredit(clip.ownerId, pricePerSec, "watch_earning", { clipId: clip.id, viewerId: viewer.id });
+        await stream.charge(); // REAL on-chain pathUSD: viewer's channel → creator (operator-settled, refunded on close)
         ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
         if (clip.live) { live.liveBeat(clip.id, viewer?.id ?? fromLabel); live.liveAddPaid(clip.id, pricePerSec); }
         yield JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator });
