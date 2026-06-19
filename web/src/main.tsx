@@ -6,6 +6,7 @@
  */
 import "./styles.css";
 import { StrictMode, useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
@@ -142,13 +143,28 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
   const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
   const [summary, setSummary] = useState<CloseSummary | null>(null);
   const [low, setLow] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fsControls, setFsControls] = useState(true);
   const handle = useRef<WatchHandle | null>(null);
+  const player = useRef<HTMLDivElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const capping = useRef(false);
+  const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deposit = low ? LOW_CAP : 0.5;
   const collab = clip.recipients.length > 1;
 
   useEffect(() => () => { handle.current?.stop().catch(() => {}); }, []);
+  useEffect(() => {
+    const onFullScreenChange = () => { if (!document.fullscreenElement) setFullscreen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
+    document.addEventListener("fullscreenchange", onFullScreenChange);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullScreenChange);
+      document.removeEventListener("keydown", onKey);
+      if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    };
+  }, []);
 
   async function start() {
     setSummary(null); setSpent(0); setSecs(0); setReason(null); capping.current = false; setPhase("opening");
@@ -172,6 +188,27 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
     if (phase === "watching") { void closeOut("ended"); return; }
     void start();
   }
+  function revealFsControls() {
+    if (!fullscreen) return;
+    setFsControls(true);
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    hideFsTimer.current = setTimeout(() => setFsControls(false), 1800);
+  }
+  async function openFullscreen(e: MouseEvent) {
+    e.stopPropagation();
+    setFullscreen(true);
+    setFsControls(true);
+    await player.current?.requestFullscreen?.().catch(() => {});
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    hideFsTimer.current = setTimeout(() => setFsControls(false), 1800);
+  }
+  async function closeFullscreen(e?: MouseEvent) {
+    e?.stopPropagation();
+    setFullscreen(false);
+    setFsControls(true);
+    if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  }
   const live = phase === "watching";
   const pct = Math.min(100, (spent / deposit) * 100);
 
@@ -180,10 +217,27 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
       <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={onBack}>← Back</button><span className="muted">watching</span></div>
       <div className="watch">
         <div>
-          <div className="player click-player" onClick={togglePlayback} title={live ? "click to stop" : "click to start"}>
+          <div
+            ref={player}
+            className={"player click-player" + (fullscreen ? " player-fullscreen" : "")}
+            onClick={togglePlayback}
+            onMouseMove={revealFsControls}
+            title={live ? "click to stop" : "click to start"}
+          >
             {clip.hasVideo
               ? <video ref={video} src={videoSrc(clip.id)} loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
+            <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
+            {fullscreen && (
+              <div className={"fs-layer" + (fsControls ? " show" : "")}>
+                <button className="fs-back" onClick={closeFullscreen}>← Back</button>
+                <div className="fs-cost">
+                  <span>cost</span>
+                  <b>− {usd(spent)}</b>
+                  <small>{usd(Number(clip.pricePerSec))}/sec · {secs}s</small>
+                </div>
+              </div>
+            )}
             {phase === "idle" && <div className="ov">▶ Click the video or press “Watch” — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
             {phase === "opening" && <div className="ov">opening payment channel on Tempo… (~3–6s)</div>}
             {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of funds — payment stopped, so playback stopped." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
