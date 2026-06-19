@@ -35,6 +35,7 @@ code { background: #000; padding: 1px 5px; border-radius: 5px; font-size: 0.85em
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 19px; letter-spacing: -0.3px; }
 .brand .dot { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 14px rgba(145,71,255,0.6); }
+.brand-mark { display: block; flex: none; filter: drop-shadow(0 0 12px rgba(145,71,255,0.55)); }
 .brand b { background: linear-gradient(135deg, #c9b3ff, #9fd0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .nav-links { display: flex; gap: 4px; }
 .nav-link { padding: 7px 12px; border-radius: 8px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; font-weight: 600; }
@@ -279,6 +280,13 @@ textarea.input { resize: vertical; font-family: inherit; }
 .login-hero-sparkles { position: absolute; inset: 0; width: 100%; height: 100%; }
 .login-hero-mask { position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(closest-side at 50% 50%, transparent 30%, var(--bg) 100%); }
+
+/* ---- Ambient app-wide sparkles (behind all content) ---- */
+.app-sparkles { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; opacity: 0.5; }
+.app-sparkles-mask { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 0%, transparent 40%, var(--bg) 100%); }
+/* keep real UI above the sparkle field */
+.page, .login { position: relative; z-index: 1; }
 
 /* ---- Login footer ---- */
 .login-foot { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 18px; }

@@ -28,6 +28,26 @@ const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
 
+// ───────────────────────── brand mark (logo) ─────────────────────────
+/** TempoFlow logo: a play head streaming forward over a flow wave (money/sec).
+ *  Same artwork as /favicon.svg so the tab icon and the in-app logo match. */
+function BrandMark({ size = 24 }: { size?: number }) {
+  const gid = `tf-${size}`;
+  return (
+    <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={gid} x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="var(--accent)" />
+          <stop offset="1" stopColor="var(--accent2)" />
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="30" height="30" rx="9" fill={`url(#${gid})`} />
+      <path d="M12 8.2 L23 15.2 a0.95 0.95 0 0 1 0 1.6 L12 23.8 Z" fill="#fff" />
+      <path d="M5 26.4 q3.2 -3.4 6.4 0 t6.4 0 t6.4 0" fill="none" stroke="#fff" strokeWidth="2.1" strokeLinecap="round" opacity="0.9" />
+    </svg>
+  );
+}
+
 // ───────────────────────── money-flow canvas ─────────────────────────
 function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -80,13 +100,13 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
         <SparklesCore
           background="transparent"
           minSize={0.6}
-          maxSize={1.4}
-          particleDensity={90}
-          speed={1.2}
+          maxSize={1.6}
+          particleDensity={200}
+          speed={1.4}
           particleColor="#9147ff"
           className="login-hero-sparkles"
         />
-        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><span className="dot" />Tempo<b>Flow</b></div>
+        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><BrandMark size={40} />Tempo<b>Flow</b></div>
         {/* fade the sparkle field's edges into the page background */}
         <div className="login-hero-mask" />
       </div>
@@ -1092,6 +1112,9 @@ function App() {
   const [search, setSearch] = useState("");
   // ad (earn)
   const [adCampaign, setAdCampaign] = useState<string | null>(null);
+  const [auctionRate, setAuctionRate] = useState<number | null>(null); // auction clearing price for AdWatch
+  // go-live (creator)
+  const [liveTitle, setLiveTitle] = useState(""); const [goingLive, setGoingLive] = useState(false);
   // studio (creator upload)
   const [title, setTitle] = useState(""); const [tags, setTags] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
   const [price, setPrice] = useState("0.002"); // creator-set price ($/sec) for new uploads
@@ -1155,6 +1178,15 @@ function App() {
     try { await uploadClip(me.id, title.trim(), tags.split(",").map((t) => t.trim()).filter(Boolean), file, 60, price); setTitle(""); setTags(""); setFile(null); refreshFeed(); }
     catch (e: any) { setError(e?.message ?? String(e)); } setUploading(false);
   }
+  async function startGoLive() {
+    if (!me) return; setGoingLive(true);
+    try {
+      const clip = await goLive(me.id, liveTitle.trim() || `${me.name} — LIVE`, ["live"]);
+      setLiveTitle(""); refreshFeed();
+      setCurrent(clip); setAdCampaign(null); setProfileId(null); setView("watch"); // jump into your own stream
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    setGoingLive(false);
+  }
   async function savePrice(id: string) {
     if (!me) return; const v = priceEdits[id]; if (v == null) return; setSavingPrice(id);
     try { const updated = await setClipPrice(id, me.id, v); setFeed((fd) => fd.map((c) => (c.id === id ? updated : c))); setPriceEdits((p) => { const nx = { ...p }; delete nx[id]; return nx; }); }
@@ -1178,8 +1210,18 @@ function App() {
 
   return (
     <>
+      <SparklesCore
+        background="transparent"
+        minSize={0.5}
+        maxSize={1.3}
+        particleDensity={70}
+        speed={0.8}
+        particleColor="#9147ff"
+        className="app-sparkles"
+      />
+      <div className="app-sparkles-mask" />
       <div className="nav">
-        <div className="brand"><span className="dot" />Tempo<b>Flow</b></div>
+        <div className="brand"><BrandMark size={24} />Tempo<b>Flow</b></div>
         <div className="nav-links">{nav.map(([v, l]) => <button key={v} className={"nav-link" + (view === v ? " active" : "")} onClick={() => go(v)}>{l}</button>)}</div>
         <GlobalSearch
           query={search}
@@ -1207,7 +1249,7 @@ function App() {
         : view === "watch" && current
         ? <WatchView key={current.id} clip={current} me={me} balance={balance} onTopup={() => setTopupOpen(true)} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
         : view === "earn" && activeAd
-        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} onBack={() => setAdCampaign(null)} onProfile={openProfile} />
+        ? <AdWatch key={activeAd.id} ad={activeAd} me={me} rewardRate={auctionRate} onBack={() => { setAdCampaign(null); setAuctionRate(null); }} onProfile={openProfile} />
         : (
           <div className="page">
             {view === "home" && (<>
@@ -1217,6 +1259,14 @@ function App() {
 
             {view === "studio" && (<>
               <div className="section-title">Creator Studio</div>
+              <div className="login-card golive-card" style={{ marginTop: 0, marginBottom: 18 }}>
+                <h3 style={{ marginTop: 0 }}>🔴 Go live</h3>
+                <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Start a live stream — every viewer pays per second, and a shared real-time meter shows concurrent watchers, combined $/sec, and 👏 cheers.</div>
+                <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                  <input className="input" placeholder="Stream title (e.g. Live coding on Tempo)" value={liveTitle} onChange={(e) => setLiveTitle(e.target.value)} style={{ flex: 1 }} />
+                  <button className="btn" onClick={startGoLive} disabled={goingLive}>{goingLive ? "going live…" : "🔴 Go live"}</button>
+                </div>
+              </div>
               <div className="login-card" style={{ marginTop: 0, marginBottom: 18 }}>
                 <h3 style={{ marginTop: 0 }}>Upload a video</h3>
                 <div className="row" style={{ flexDirection: "column", gap: 9 }}>
@@ -1264,13 +1314,15 @@ function App() {
             {view === "earn" && (<>
               <div className="section-title">Earn — watch ads, get paid for your attention</div>
               <div className="muted" style={{ margin: "-8px 2px 14px", fontSize: 13 }}>Each ad pays per second while attention is verified. Ads with no funding can’t pay.</div>
+              <AuctionPanel me={me} onStart={(id, clearing) => { setAuctionRate(clearing); setAdCampaign(id); }} />
+              <div className="section-title" style={{ marginTop: 22 }}>Or pick an ad yourself</div>
               <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))" }}>
                 {campaigns.map((c) => {
                   const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget);
                   const funded = c.funded ?? budget - spent >= Number(c.pricePerSec);
                   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
                   return (
-                    <div key={c.id} className="vcard" onClick={() => funded && setAdCampaign(c.id)} style={{ cursor: funded ? "pointer" : "default" }}>
+                    <div key={c.id} className="vcard" onClick={() => funded && (setAuctionRate(null), setAdCampaign(c.id))} style={{ cursor: funded ? "pointer" : "default" }}>
                       <div className="vthumb ad">
                         {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} preload="metadata" muted playsInline /> : <span className="emoji">{c.thumb ?? "📣"}</span>}
                         <span className="adtag">● AD</span>
