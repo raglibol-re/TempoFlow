@@ -4,9 +4,11 @@
  * run campaigns, manage your profile. Payments are shown as app credit; Stripe
  * top-ups and Tempo settlement stay on the server.
  */
+import "./tailwind.css";
 import "./styles.css";
 import { StrictMode, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
+import { SparklesCore } from "@/components/ui/sparkles";
 import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
@@ -73,7 +75,20 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
   }
   return (
     <div className="login">
-      <div className="brand" style={{ fontSize: 30, justifyContent: "center" }}><span className="dot" />Tempo<b>Flow</b></div>
+      <div className="login-hero">
+        <SparklesCore
+          background="transparent"
+          minSize={0.6}
+          maxSize={1.4}
+          particleDensity={90}
+          speed={1.2}
+          particleColor="#9147ff"
+          className="login-hero-sparkles"
+        />
+        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><span className="dot" />Tempo<b>Flow</b></div>
+        {/* fade the sparkle field's edges into the page background */}
+        <div className="login-hero-mask" />
+      </div>
       <div className="muted" style={{ textAlign: "center", marginTop: 6 }}>Pay per second, earn from ads, and top up with Stripe.</div>
 
       <div className="login-card">

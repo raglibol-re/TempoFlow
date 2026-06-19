@@ -274,6 +274,12 @@ textarea.input { resize: vertical; font-family: inherit; }
 .topup-choice:hover { border-color: var(--accent); }
 .topup-choice.on { border-color: var(--accent); background: rgba(145,71,255,.2); box-shadow: 0 0 0 1px var(--accent); }
 
+/* ---- Login hero (sparkles behind the wordmark) ---- */
+.login-hero { position: relative; height: 150px; display: grid; place-items: center; margin-bottom: 4px; overflow: hidden; }
+.login-hero-sparkles { position: absolute; inset: 0; width: 100%; height: 100%; }
+.login-hero-mask { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(closest-side at 50% 50%, transparent 30%, var(--bg) 100%); }
+
 /* ---- Login footer ---- */
 .login-foot { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 18px; }
 
