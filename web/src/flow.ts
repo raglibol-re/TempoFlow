@@ -153,6 +153,13 @@ export const sendTip = (as: string, clipId: string, amountUsd: number) =>
 export const runAuction = (viewer: string) =>
   jpost("/auction/run", { viewer }, "run auction") as Promise<AuctionResult>;
 
+// ── Autonomous interest-matching ad agent (deterministic, no API key) ─────────
+export interface AdMatch { match: Campaign | null; reason: string; matchedTags: string[]; interest: string[] }
+/** Ask the agent to pick the funded ad that best matches these interest tags. */
+export const matchAd = (tags: string[], exclude: string[] = []) =>
+  jget(`/agent/match-ad?tags=${encodeURIComponent(tags.join(","))}&exclude=${encodeURIComponent(exclude.join(","))}`, "match ad")
+    .catch(() => ({ match: null, reason: "agent offline", matchedTags: [], interest: tags })) as Promise<AdMatch>;
+
 // ── Feature 3: pay-per-token creator AI (NDJSON stream) ──────────────────────
 export interface AskEvent { type: "start" | "token" | "done" | "out-of-balance" | "error"; text?: string; tokens?: number; costUsd?: number; balance?: number; via?: string; pricePerToken?: number; creator?: string; error?: string }
 /** Stream a creator-AI answer, billing per token. Calls `onEvent` for each NDJSON

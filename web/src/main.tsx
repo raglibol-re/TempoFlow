@@ -789,6 +789,10 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
 
   async function start() {
     setSummary(null); setSpent(0); setSecs(0); setReason(null); capping.current = false; setPhase("opening");
+    // Play INSTANTLY — don't make the viewer wait ~8–15s for the on-chain channel to
+    // open. The video starts now; the payment stream connects in the background and
+    // charging begins as soon as it's ready.
+    video.current?.play().catch(() => {});
     try {
       handle.current = await watchClip(clip, me,
         (t: Tick) => {
@@ -871,7 +875,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             )}
             {streamEnded && <div className="ov">🔴 Stream ended — the creator left the live.</div>}
             {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
-            {!streamEnded && phase === "opening" && <div className="ov">starting stream…</div>}
+            {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
             {!streamEnded && phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
           <PopularityTimeline

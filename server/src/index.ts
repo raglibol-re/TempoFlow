@@ -1017,6 +1017,29 @@ app.post("/auction/run", async (c) => {
   return c.json(runAuction(enriched));
 });
 
+// ── Autonomous interest-matching ad agent (DETERMINISTIC — no API key) ────────
+// The agent's decision step: it reads what the viewer is into (the tags of the
+// content they're watching) and the funded ad inventory, then picks the ad whose
+// targeting best overlaps. The existing attention flow then settles the payout to
+// the viewer on-chain. Pure policy (tag overlap + budget) → a real autonomous agent
+// with NO LLM/API key required.
+app.get("/agent/match-ad", async (c) => {
+  const interest = String(c.req.query("tags") ?? "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+  const exclude = new Set(String(c.req.query("exclude") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  const ads = (await Promise.all(getCampaigns().map(enrichCampaign))).filter((a) => a.funded && !exclude.has(a.id));
+  if (!ads.length) return c.json({ match: null, reason: "no funded ads are bidding right now", interest });
+  const scored = ads.map((a) => {
+    const tags = (a.tags ?? []).map((t) => t.toLowerCase());
+    const overlap = tags.filter((t) => interest.includes(t));
+    return { ad: a, overlap, score: overlap.length };
+  }).sort((x, y) => y.score - x.score || Number(y.ad.remainingUsd ?? 0) - Number(x.ad.remainingUsd ?? 0));
+  const best = scored[0]!;
+  const reason = best.score > 0
+    ? `matched your interest in ${best.overlap.map((t) => "#" + t).join(" ")}`
+    : "no exact interest match — picked the best-funded ad";
+  return c.json({ match: best.ad, reason, matchedTags: best.overlap, interest });
+});
+
 // ── Feature 3: "Ask this creator's AI" — pay-per-token, split to the creator ──
 app.post("/ask/:creatorId", async (c) => {
   const creator = getUser(c.req.param("creatorId"));
