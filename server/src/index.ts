@@ -52,6 +52,7 @@ import {
   campaignAddEscrow, campaignStop,
   clipLikeToggle, clipLikeCount, clipLikedBy, commentInsert, commentsForClip,
   chatInsert, chatForClip, clipIncViews, clipViews,
+  clipSecondWatchCounts,
   type GoalRow,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
@@ -531,6 +532,17 @@ app.get("/clips/:id/social", (c) => {
     liked: clipLikedBy(id, viewer),
     comments: commentsForClip(id),
   });
+});
+app.get("/videos/:id/popularity", (c) => {
+  const clip = getClip(c.req.param("id"));
+  if (!clip) return c.json({ error: "clip not found" }, 404);
+  const duration = Math.max(0, Math.floor(Number(clip.durationSec) || 0));
+  const counts = clipSecondWatchCounts(clip.id, 0, duration);
+  const popularity = Array.from({ length: duration }, (_, second) => ({
+    second,
+    watchCount: counts.get(second) ?? 0,
+  }));
+  return c.json({ videoId: clip.id, duration, popularity });
 });
 /** Post a comment on a clip. */
 app.post("/clips/:id/comments", async (c) => {

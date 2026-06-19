@@ -17,11 +17,12 @@ import {
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
-  viewClip, toggleLike, fetchSocial, postComment, fetchLiveChat, postLiveChat, type SocialComment,
+  viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser, type Goal, type AuctionResult, type LiveStats, type AskEvent,
 } from "./flow";
+import { popularityPath, positionToTime, watchCountAtSecond, type SecondPopularity } from "./video-timeline";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
 const nf = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(n) < 1 ? 4 : 2 });
@@ -619,10 +620,116 @@ function LiveChat({ clipId, me }: { clipId: string; me: DemoUser }) {
 }
 
 const LOW_CAP = 0.012;
+
+function formatTime(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function incrementPopularity(popularity: SecondPopularity[], second: number): SecondPopularity[] {
+  const target = Math.max(0, Math.floor(second));
+  const next = [...popularity];
+  const idx = next.findIndex((p) => Math.floor(p.second) === target);
+  if (idx >= 0) {
+    const current = next[idx]!;
+    next[idx] = { second: current.second, watchCount: Math.max(0, current.watchCount) + 1 };
+  }
+  else next.push({ second: target, watchCount: 1 });
+  return next.sort((a, b) => a.second - b.second);
+}
+
+function PopularityTimeline({
+  videoDuration,
+  currentTime,
+  bufferedTime,
+  popularityBySecond,
+  onSeek,
+}: {
+  videoDuration: number;
+  currentTime: number;
+  bufferedTime?: number;
+  popularityBySecond: SecondPopularity[];
+  onSeek: (targetTime: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<{ time: number; x: number; watchCount: number } | null>(null);
+  const [width, setWidth] = useState(640);
+  const duration = Math.max(0, Number.isFinite(videoDuration) ? videoDuration : 0);
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+  const bufferedPct = duration > 0 ? Math.min(100, Math.max(0, ((bufferedTime ?? 0) / duration) * 100)) : 0;
+  const graphHeight = 42;
+  const path = popularityPath(popularityBySecond, duration, width, graphHeight);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setWidth(Math.max(1, Math.floor(el.getBoundingClientRect().width)));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  function timeFromEvent(e: MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return positionToTime(e.clientX, rect.left, rect.width, duration);
+  }
+
+  function handleMove(e: MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const time = positionToTime(e.clientX, rect.left, rect.width, duration);
+    setHover({
+      time,
+      x: Math.min(rect.width, Math.max(0, e.clientX - rect.left)),
+      watchCount: watchCountAtSecond(popularityBySecond, time),
+    });
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="yt-timeline"
+      onClick={(e) => { e.stopPropagation(); onSeek(timeFromEvent(e)); }}
+      onMouseMove={handleMove}
+      onMouseLeave={() => setHover(null)}
+      role="slider"
+      aria-label="Video timeline"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      aria-valuenow={Math.round(currentTime)}
+    >
+      <div className="yt-pop-graph">
+        <svg viewBox={`0 0 ${width} ${graphHeight}`} preserveAspectRatio="none" aria-hidden="true">
+          <path className="yt-pop-fill" d={path ? `${path} L ${width} ${graphHeight} L 0 ${graphHeight} Z` : ""} />
+          <path className="yt-pop-line" d={path} />
+        </svg>
+      </div>
+      <div className="yt-track">
+        <span className="yt-buffered" style={{ width: `${bufferedPct}%` }} />
+        <span className="yt-progress" style={{ width: `${progressPct}%` }} />
+      </div>
+      {hover && duration > 0 && (
+        <>
+          <span className="yt-hover-marker" style={{ left: hover.x }} />
+          <span className="yt-hover-label" style={{ left: hover.x }}>
+            {formatTime(hover.time)} · {hover.watchCount} views
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, onTopup }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void; balance: number | null; onTopup: () => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing">("idle");
   const [spent, setSpent] = useState(0);
   const [secs, setSecs] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(clip.durationSec);
+  const [bufferedTime, setBufferedTime] = useState(0);
+  const [popularity, setPopularity] = useState<SecondPopularity[]>([]);
   const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
   const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [summary, setSummary] = useState<CloseSummary | null>(null);
@@ -639,6 +746,33 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
 
   useEffect(() => () => { handle.current?.stop().catch(() => {}); }, []);
   useEffect(() => { void viewClip(clip.id); }, [clip.id]); // count a view when the page opens
+  useEffect(() => {
+    setPopularity([]);
+    fetchVideoPopularity(clip.id).then((snapshot) => {
+      setPopularity(snapshot.popularity ?? []);
+      if (snapshot.duration > 0) setVideoDuration(snapshot.duration);
+    }).catch(() => setPopularity([]));
+  }, [clip.id]);
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    const sync = () => {
+      setCurrentTime(v.currentTime || 0);
+      if (Number.isFinite(v.duration) && v.duration > 0) setVideoDuration(v.duration);
+      const ranges = v.buffered;
+      setBufferedTime(ranges.length ? ranges.end(ranges.length - 1) : 0);
+    };
+    v.addEventListener("loadedmetadata", sync);
+    v.addEventListener("durationchange", sync);
+    v.addEventListener("timeupdate", sync);
+    v.addEventListener("progress", sync);
+    return () => {
+      v.removeEventListener("loadedmetadata", sync);
+      v.removeEventListener("durationchange", sync);
+      v.removeEventListener("timeupdate", sync);
+      v.removeEventListener("progress", sync);
+    };
+  }, [clip.id]);
   useEffect(() => {
     const onFullScreenChange = () => { if (!document.fullscreenElement) setFullscreen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
@@ -657,6 +791,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
       handle.current = await watchClip(clip, me,
         (t: Tick) => {
           setPhase("watching"); setSpent(t.spentUsd); setSecs(t.second); video.current?.play().catch(() => {});
+          setPopularity((prev) => incrementPopularity(prev, t.second - 1));
           if (low && t.spentUsd >= LOW_CAP && !capping.current) { capping.current = true; closeOut("out-of-funds"); }
         },
         (r) => { if (!capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
@@ -693,6 +828,12 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
     setFsControls(true);
     if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
     if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  }
+  function seekVideo(targetTime: number) {
+    const duration = Math.max(0, videoDuration || clip.durationSec);
+    const target = Math.min(Math.max(0, targetTime), Math.max(0, duration - 0.05));
+    if (video.current) video.current.currentTime = target;
+    setCurrentTime(target);
   }
   const live = phase === "watching";
   const pct = Math.min(100, (spent / deposit) * 100);
@@ -731,6 +872,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             {!streamEnded && phase === "opening" && <div className="ov">starting stream…</div>}
             {!streamEnded && phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
+          <PopularityTimeline
+            videoDuration={videoDuration || clip.durationSec}
+            currentTime={currentTime}
+            bufferedTime={bufferedTime}
+            popularityBySecond={popularity}
+            onSeek={seekVideo}
+          />
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
             <div className="a">{clip.thumb ?? "🎬"}</div>
