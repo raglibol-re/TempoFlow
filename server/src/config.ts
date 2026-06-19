@@ -52,7 +52,10 @@ export const settlementClient = createWalletClient({
 
 /**
  * Shared channel store. The session middleware persists channel state here;
- * Sse.serve meters/charges against the same store by channelId.
+ * Sse.serve meters/charges against the same store by channelId. In-memory: open
+ * channels are lost on a server restart, so the demo must run a STABLE server
+ * (no hot-reload mid-session). The client's close() degrades gracefully if a
+ * channel is gone (see web/src/flow.ts watchClip.stop), so it never shows an error.
  */
 export const channelStore = Store.memory();
 

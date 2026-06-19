@@ -51,7 +51,7 @@ import {
   pledgeInsert, pledgesForGoal, pledgeSetStatus, goalPledgedUsd, goalBackerCount, viewerPledgedUsd,
   campaignAddEscrow, campaignStop,
   clipLikeToggle, clipLikeCount, clipLikedBy, commentInsert, commentsForClip,
-  chatInsert, chatForClip, clipIncViews, clipViews,
+  chatInsert, chatForClip, clipIncViews, clipViews, videoPathOf,
   clipSecondWatchCounts,
   type GoalRow,
 } from "./db.js";
@@ -573,42 +573,46 @@ app.post("/live/:id/chat", async (c) => {
   return c.json({ message: chatInsert(id, user.id, body) });
 });
 
-// ── Serve uploaded video (HTTP range support for <video>) — clips AND ads ────
-app.get("/video/:id", (c) => {
+// ── Serve uploaded video (HTTP range streaming for <video>) — clips AND ads ──
+// Perf: immutable cache (video for an id never changes → no re-download on reload/
+// seek/re-open), chunk-capped range responses (first frames arrive fast and the
+// tunnel isn't asked for the whole file at once), clamped range (a Content-Length ↔
+// body mismatch otherwise stalls playback → "video won't load"), cheap path lookup.
+const VIDEO_CACHE = "public, max-age=604800, immutable";
+const VIDEO_CHUNK = 2 * 1024 * 1024; // 2 MB per range response
+app.on(["GET", "HEAD"], "/video/:id", (c) => {
   const id = c.req.param("id");
-  const item = (getClip(id) ?? getCampaign(id)) as any;
-  if (!item?.videoPath) return c.json({ error: "no video for this id" }, 404);
-  const clip = item;
-  if (isRemoteVideo(clip.videoPath)) {
-    return c.redirect(clip.videoPath, 302);
-  }
-  const path = join(uploadsDir, clip.videoPath);
+  const videoPath = videoPathOf(id);
+  if (!videoPath) return c.json({ error: "no video for this id" }, 404);
+  const origin = c.req.header("origin") ?? "*";
+  if (isRemoteVideo(videoPath)) return c.redirect(videoPath, 302);
+  const path = join(uploadsDir, videoPath);
   if (!existsSync(path)) return c.json({ error: "file missing" }, 404);
   const total = statSync(path).size;
-  const ext = clip.videoPath.split(".").pop()?.toLowerCase() ?? "mp4";
+  const ext = videoPath.split(".").pop()?.toLowerCase() ?? "mp4";
   const ctype = MIME[ext] ?? "application/octet-stream";
-  const origin = c.req.header("origin") ?? "*";
+  const base: Record<string, string> = {
+    "Content-Type": ctype, "Accept-Ranges": "bytes", "Cache-Control": VIDEO_CACHE,
+    "Access-Control-Allow-Origin": origin, "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
+  };
+  if (c.req.method === "HEAD") return new Response(null, { headers: { ...base, "Content-Length": String(total) } });
   const range = c.req.header("range");
   if (range) {
     const m = /bytes=(\d+)-(\d*)/.exec(range);
-    const start = m ? Number(m[1]) : 0;
-    const end = m && m[2] ? Number(m[2]) : total - 1;
+    let start = m ? Number(m[1]) : 0;
+    let end = m && m[2] ? Number(m[2]) : total - 1;
+    if (!Number.isFinite(start) || start < 0) start = 0;
+    if (!Number.isFinite(end) || end > total - 1) end = total - 1;
+    if (start > end) start = 0;
+    if (end - start + 1 > VIDEO_CHUNK) end = start + VIDEO_CHUNK - 1; // cap → fast first paint + paced over the tunnel
     const stream = Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream;
     return new Response(stream, {
       status: 206,
-      headers: {
-        "Content-Range": `bytes ${start}-${end}/${total}`,
-        "Accept-Ranges": "bytes",
-        "Content-Length": String(end - start + 1),
-        "Content-Type": ctype,
-        "Access-Control-Allow-Origin": origin,
-      },
+      headers: { ...base, "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(end - start + 1) },
     });
   }
   const stream = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream;
-  return new Response(stream, {
-    headers: { "Content-Length": String(total), "Content-Type": ctype, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": origin },
-  });
+  return new Response(stream, { headers: { ...base, "Content-Length": String(total) } });
 });
 // ── Advertiser: create an ad (with uploaded video) + fund it ─────────────────
 app.post("/campaigns", async (c) => {

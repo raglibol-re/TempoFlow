@@ -393,6 +393,15 @@ export function clipIncViews(clipId: string): number {
 export const clipViews = (clipId: string): number =>
   ((db.prepare("SELECT views FROM clips WHERE id=?").get(clipId) as any)?.views ?? 0) as number;
 
+/** Cheap lookup of just the stored video path for a clip OR campaign id. Used by the
+ *  hot /video/:id route so each (range) request doesn't run the enriched clip query. */
+export function videoPathOf(id: string): string | undefined {
+  const c = db.prepare("SELECT videoPath FROM clips WHERE id=?").get(id) as any;
+  if (c?.videoPath) return c.videoPath as string;
+  const a = db.prepare("SELECT videoPath FROM campaigns WHERE id=?").get(id) as any;
+  return (a?.videoPath as string) || undefined;
+}
+
 // ── Per-second clip popularity for dynamic pricing ───────────────────────────
 export interface ClipSecondPopularity {
   clipId: string;

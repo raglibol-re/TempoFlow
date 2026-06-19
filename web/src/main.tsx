@@ -854,7 +854,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             title={live ? "click to stop" : "click to start"}
           >
             {clip.hasVideo
-              ? <video ref={video} src={videoSrc(clip.id)} loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
+              ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
             <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
             {clip.live && <span className="live-badge player-live">● LIVE</span>}
@@ -1095,7 +1095,7 @@ function AdWatch({ ad, me, onBack, onProfile, rewardRate }: { ad: Campaign; me: 
             title={!watching ? "click to start" : attention ? "click to pause" : "click to resume"}
           >
             {ad.hasVideo
-              ? <video ref={video} src={videoSrc(ad.id)} loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
+              ? <video ref={video} src={videoSrc(ad.id)} preload="metadata" loop playsInline style={{ opacity: live ? 1 : 0.35 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.35 }}>{ad.thumb ?? "📣"}</span>}
             <span className="adtag">● AD</span>
             <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
@@ -1502,7 +1502,7 @@ function GlobalSearch({
                     return (
                       <button key={clip.id} className="search-row" onClick={() => openClip(clip)}>
                         <span className="search-thumb">
-                          {clip.hasVideo ? <video src={videoSrc(clip.id) + "#t=0.1"} muted playsInline /> : <span>{clip.thumb ?? "🎬"}</span>}
+                          {clip.hasVideo ? <video src={videoSrc(clip.id) + "#t=0.1"} preload="metadata" muted playsInline /> : <span>{clip.thumb ?? "🎬"}</span>}
                         </span>
                         <span className="search-copy">
                           <b>{clip.title}</b>
@@ -1806,7 +1806,7 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
         {/* creator video — money OUT */}
         <div className="flow-pane">
           <div className="player">
-            {clip.hasVideo ? <video ref={video} src={videoSrc(clip.id)} loop playsInline muted={false} /> : <span className="emoji">{clip.thumb ?? "🎬"}</span>}
+            {clip.hasVideo ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline muted={false} /> : <span className="emoji">{clip.thumb ?? "🎬"}</span>}
             <span className="badge" style={{ background: "var(--out)" }}>↘ paying creator</span>
           </div>
           <div className="w-title" style={{ fontSize: 15 }}>{clip.title}</div>
@@ -2113,7 +2113,7 @@ function App() {
                     return (
                       <div key={c.id} className="adrow" style={{ borderLeftColor: c.live ? "var(--out)" : "var(--accent)" }}>
                         <div className="adrow-thumb" style={{ cursor: "pointer", position: "relative" }} onClick={() => { setCurrent(c); setView("watch"); }}>
-                          {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "🎬"}</span>}
+                          {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} preload="metadata" muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "🎬"}</span>}
                           {c.live && <span className="live-badge" style={{ position: "absolute", top: 4, left: 4 }}>● LIVE</span>}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -2209,7 +2209,7 @@ function App() {
                   return (
                     <div key={c.id} className="adrow">
                       <div className="adrow-thumb ad">
-                        {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "📣"}</span>}
+                        {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} preload="metadata" muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "📣"}</span>}
                         <span className="adtag">● AD</span>
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>

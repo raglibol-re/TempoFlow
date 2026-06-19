@@ -474,11 +474,23 @@ export async function watchClip(
   })();
   return {
     async stop() {
-      try { await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" }); }
-      catch (e: any) { throw new Error(`stop failed: ${e?.message ?? e}`); }
+      // Tell the server to stop charging (best-effort — it's only a flag).
+      await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" }).catch(() => {});
       await drained;
       let receipt: any;
-      try { receipt = await mgr.close(); } catch (e: any) { throw new Error(`settle/refund failed: ${e?.message ?? e}`); }
+      try {
+        receipt = await mgr.close(); // settle highest voucher on-chain + refund unused deposit
+      } catch (e: any) {
+        const msg = String(e?.shortMessage ?? e?.message ?? e);
+        // A missing/expired channel means there's nothing left to settle: the per-second
+        // vouchers already paid the creator, and any unspent deposit auto-refunds when the
+        // channel lapses (or the server's in-memory store was reset). This is NOT a user
+        // error — return a best-effort summary instead of a scary toast.
+        if (/channel not found|not found|410|already|expired|no .*channel/i.test(msg)) {
+          return { spentUsd: undefined, seconds: undefined, txHash: undefined, channelId: undefined };
+        }
+        throw new Error(`settle/refund failed: ${msg}`);
+      }
       return {
         spentUsd: rawToUsd(receipt?.spent),
         seconds: typeof receipt?.units === "number" ? receipt.units : undefined,
