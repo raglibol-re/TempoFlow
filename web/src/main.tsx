@@ -16,12 +16,8 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-<<<<<<< HEAD
-  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, updateClipMeta, deleteClip,
-=======
-  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats,
+  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   SERVER_CONFIGURED, saveServerUrl,
->>>>>>> 563ce35a6cd5e7af2d3fa1825df4886f53b60acd
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser, type Goal, type AuctionResult, type LiveStats, type AskEvent,
 } from "./flow";
@@ -1279,7 +1275,14 @@ function App() {
     fetchUsers().then(setUsers).catch((e) => setError(e.message));
     refreshFeed();
     fetchCampaigns().then(setCampaigns).catch(() => {});
-    try { const saved = localStorage.getItem("tempoflow-me"); if (saved) setMe(JSON.parse(saved)); } catch {}
+    try {
+      const saved = localStorage.getItem("tempoflow-me");
+      if (saved) {
+        const u = JSON.parse(saved) as DemoUser;
+        setMe(u); // optimistic; hydrate the signing key if missing (app accounts)
+        if (!isValidKey(u.key)) ensureKey(u).then((hu) => { setMe(hu); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); }).catch(() => {});
+      }
+    } catch {}
     const payment = new URLSearchParams(window.location.search).get("payment");
     if (payment === "success") setPaymentNotice("Payment received. Your balance will refresh after Stripe confirms it.");
     if (payment === "cancel") setPaymentNotice("Payment canceled. No credit was added.");
@@ -1310,7 +1313,7 @@ function App() {
       .catch(() => setPaymentNotice("Payment received. Waiting for Stripe confirmation."));
   }, [me]);
 
-  function login(u: DemoUser) { localStorage.setItem("tempoflow-me", JSON.stringify(u)); setMe(u); setError(null); }
+  async function login(u: DemoUser) { const hu = await ensureKey(u); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); setMe(hu); setError(null); }
   function logout() { localStorage.removeItem("tempoflow-me"); setMe(null); setAdCampaign(null); setProfileId(null); setView("home"); }
   function openProfile(id: string) { setProfileId(id); setCurrent(null); setAdCampaign(null); setError(null); setView("profile"); }
   function onMeUpdate(u: Partial<DemoUser>) { setMe((m) => { if (!m) return m; const merged = { ...m, ...u }; localStorage.setItem("tempoflow-me", JSON.stringify(merged)); return merged; }); }

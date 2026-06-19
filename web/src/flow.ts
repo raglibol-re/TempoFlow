@@ -22,6 +22,23 @@ export const tempoAppUrl = TEMPO_APP_URL;
 export const exportPrivateKey = (as: string): Promise<{ address: `0x${string}`; key: `0x${string}` }> =>
   jget(`/wallet/export?as=${encodeURIComponent(as)}`, "export wallet key");
 
+/** A 32-byte hex private key (what viem's privateKeyToAccount requires). */
+const KEY_RE = /^0x[0-9a-fA-F]{64}$/;
+export const isValidKey = (k?: string): k is `0x${string}` => !!k && KEY_RE.test(k);
+
+/** Guarantee a user object carries a usable signing key. App-created accounts keep
+ *  their key SERVER-side (the browser gets `key: ""`), so on-chain signing (watch,
+ *  fund) would throw "invalid private key". Here we pull the key back from the server
+ *  so the browser can sign. Falls back to the original user if the fetch fails. */
+export async function ensureKey(u: DemoUser): Promise<DemoUser> {
+  if (isValidKey(u.key)) return u;
+  try {
+    const { key } = await exportPrivateKey(u.id);
+    if (isValidKey(key)) return { ...u, key };
+  } catch { /* server may not have a key on file — leave as-is, caller surfaces it */ }
+  return u;
+}
+
 /**
  * Resolve the backend URL at RUNTIME so a single Vercel build can target any
  * backend (e.g. a local machine exposed via an ngrok/cloudflared tunnel) without
@@ -396,6 +413,7 @@ export interface WatchHandle { stop: () => Promise<CloseSummary | undefined> }
 // Route browser chain calls through our server's RPC proxy (CORS-clean + 429 retry).
 const RPC_PROXY = `${SERVER_URL}/rpc`;
 function manager(user: DemoUser, maxDeposit = "0.5") {
+  if (!isValidKey(user.key)) throw new Error("Your wallet key isn't loaded — reload the page (or log out and back in). App-created accounts load it from the server automatically.");
   const account = privateKeyToAccount(user.key);
   const client = createPublicClient({ chain: tempoTestnet as any, transport: http(RPC_PROXY) });
   return sessionManager({ account, client, decimals: TOKEN_DECIMALS, maxDeposit, escrow: ESCROW_CONTRACT });
