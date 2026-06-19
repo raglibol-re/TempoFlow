@@ -32,6 +32,12 @@ const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
 
+// Theme: dark by default. Applied to <html data-theme> before React renders (no flash).
+type Theme = "dark" | "light";
+function applyTheme(t: Theme) { try { document.documentElement.dataset.theme = t; localStorage.setItem("tempoflow-theme", t); } catch { /* no storage */ } }
+const initialTheme: Theme = (() => { try { return (localStorage.getItem("tempoflow-theme") as Theme) || "dark"; } catch { return "dark"; } })();
+applyTheme(initialTheme);
+
 // ───────────────────────── brand mark (logo) ─────────────────────────
 /** TempoFlow logo: a play head streaming forward over a flow wave (money/sec).
  *  Same artwork as /favicon.svg so the tab icon and the in-app logo match. */
@@ -1964,6 +1970,8 @@ function App() {
   const [net, setNet] = useState<NetSnapshot | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [view, setView] = useState("home");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const toggleTheme = () => setTheme((t) => { const next: Theme = t === "dark" ? "light" : "dark"; applyTheme(next); return next; });
   const [current, setCurrent] = useState<Clip | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
@@ -2153,6 +2161,7 @@ function App() {
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <a className="pill mono addr-pill" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`${me.address} — view your wallet on the Tempo explorer`} style={{ textDecoration: "none" }}>{shortAddr(me.address)} ↗</a>
           <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Test funds</button>
+          <button className="theme-toggle" onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle theme">{theme === "dark" ? "☀" : "☾"}</button>
           <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onTopup={() => setTopupOpen(true)} onLogout={logout} />
         </div>
       </div>

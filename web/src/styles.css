@@ -986,3 +986,60 @@ code { background: rgba(0,0,0,.06); color: #1d1d1f; }
   .preview-hero { grid-template-columns: 1fr; height: auto; }
   .preview-panel { display: none; }
 }
+
+/* ════════════════ Dark theme (toggle via <html data-theme="dark">) ════════════════
+   The "Apple-inspired" layer above is the LIGHT theme (default :root). This block
+   restores a professional dark theme. It sits last in the file and is attribute-scoped,
+   so when data-theme="dark" it wins over the light layer. Most components read the
+   CSS variables, so re-pointing the variables flips the bulk; the rules below fix the
+   surfaces the light layer hardcoded. */
+[data-theme="dark"] {
+  --bg: #0d0d0f;
+  --surface: #161619;
+  --surface2: #1c1c21;
+  --surface3: #25252b;
+  --border: #2a2a32;
+  --text: #f1f1f4;
+  --muted: #a6a6b2;
+  --accent: #9d6bff;
+  --accent2: #5aa8ff;
+  --in: #2bd9a0;
+  --out: #ff5d73;
+  --shadow-soft: 0 1px 2px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.5);
+  --shadow-card: 0 1px 1px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.45);
+  color-scheme: dark;
+}
+[data-theme="dark"] body {
+  background:
+    radial-gradient(900px 520px at 50% -160px, rgba(157,107,255,.10), transparent 64%),
+    linear-gradient(180deg, #0d0d0f 0%, #0b0b0d 100%);
+  color: var(--text);
+}
+[data-theme="dark"] code { background: rgba(255,255,255,.08); color: var(--text); }
+[data-theme="dark"] .nav { background: rgba(13,13,15,.82); border-bottom: 1px solid var(--border); box-shadow: none; }
+[data-theme="dark"] .brand, [data-theme="dark"] .brand b { color: #fff; background: none; -webkit-text-fill-color: currentColor; }
+[data-theme="dark"] .nav-links { background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+[data-theme="dark"] .nav-link { color: var(--muted); }
+[data-theme="dark"] .nav-link:hover { background: rgba(255,255,255,.06); color: #fff; }
+[data-theme="dark"] .nav-link.active { background: var(--accent); color: #fff; box-shadow: none; }
+[data-theme="dark"] .search-input,
+[data-theme="dark"] .input { background: var(--surface2); border-color: var(--border); color: var(--text); }
+[data-theme="dark"] .search-thumb,
+[data-theme="dark"] .vthumb,
+[data-theme="dark"] .adrow-thumb { background: linear-gradient(135deg, #241d3a, #122033); }
+[data-theme="dark"] .btn { background: var(--accent); color: #fff; box-shadow: none; }
+[data-theme="dark"] .btn:hover { background: var(--accent); filter: brightness(1.12); transform: translateY(-1px); }
+[data-theme="dark"] .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+[data-theme="dark"] .btn-ghost:hover { background: var(--surface2); border-color: var(--border); }
+[data-theme="dark"] .btn-faucet { background: linear-gradient(135deg, #1f6f4a, #2bd9a0); color: #04190f; }
+[data-theme="dark"] .panel,
+[data-theme="dark"] .vcard,
+[data-theme="dark"] .login-card,
+[data-theme="dark"] .acct-menu,
+[data-theme="dark"] .search-panel,
+[data-theme="dark"] .modal { background: var(--surface); border-color: var(--border); }
+[data-theme="dark"] .pill { background: var(--surface2); border-color: var(--border); }
+
+/* theme toggle button (works in both themes) */
+.theme-toggle { background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 999px; width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; font-size: 15px; }
+.theme-toggle:hover { background: var(--surface2); }
