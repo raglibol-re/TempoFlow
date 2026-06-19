@@ -4,4 +4,5 @@ packages:
   - 'web'
   - 'agent'
 allowBuilds:
+  '@tsparticles/engine': true
   esbuild: true

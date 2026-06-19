@@ -96,6 +96,9 @@ Either way the visitor's device needs **nothing** — only a reachable backend U
 ## Stripe app credit
 
 Stripe keys are server-only. Do not add them to Vercel frontend variables.
+Do not commit real `sk_test_...` or `sk_live_...` keys. Share them with
+collaborators through Stripe Dashboard access, 1Password, Doppler, Vercel/Railway
+environment variables, or another secret manager.
 
 Backend env vars:
 
@@ -104,6 +107,23 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 APP_URL=https://your-vercel-app.vercel.app
 ```
+
+Frontend/public env var:
+
+```
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...
+```
+
+The current Stripe Checkout flow is backend-created and does not need the
+publishable key in browser code, but documenting it helps collaborators verify
+that they are using the same Stripe test account.
+
+For another developer:
+
+1. Copy `.env.example` to `.env`.
+2. Fill `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `APP_URL`.
+3. Run `pnpm install`.
+4. Run `pnpm dev`.
 
 Local webhook test:
 
