@@ -17,6 +17,7 @@ import {
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats,
+  SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser, type Goal, type AuctionResult, type LiveStats, type AskEvent,
 } from "./flow";
@@ -151,6 +152,52 @@ function Login({ users, onLogin, onError }: { users: DemoUser[]; onLogin: (u: De
         </div>
       </details>
       <div className="login-foot">No payment keys are stored in the browser.</div>
+    </div>
+  );
+}
+
+function BackendSetup({ error }: { error?: string | null }) {
+  const [url, setUrl] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  function save() {
+    try { saveServerUrl(url); } catch (e: any) { setLocalError(e?.message ?? String(e)); }
+  }
+  return (
+    <div className="login backend-setup">
+      <div className="login-hero">
+        <SparklesCore
+          background="transparent"
+          minSize={0.6}
+          maxSize={1.6}
+          particleDensity={140}
+          speed={1.2}
+          particleColor="#9147ff"
+          className="login-hero-sparkles"
+        />
+        <div className="brand" style={{ fontSize: 30, justifyContent: "center", position: "relative", zIndex: 1 }}><BrandMark size={40} />Tempo<b>Flow</b></div>
+        <div className="login-hero-mask" />
+      </div>
+      <div className="login-card">
+        <h3 style={{ marginTop: 0 }}>Backend needed</h3>
+        <div className="muted" style={{ marginBottom: 12 }}>
+          This Vercel site is the frontend. It needs a reachable backend URL to load profiles, videos, payments, and ads.
+        </div>
+        <div className="row" style={{ flexDirection: "column", gap: 8 }}>
+          <input
+            className="input"
+            placeholder="https://your-flow-backend.example.com"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            autoFocus
+          />
+          <button className="btn" onClick={save} disabled={!url.trim()}>Use backend</button>
+        </div>
+        <div className="receipt" style={{ marginTop: 14 }}>
+          Quick demo: run the backend locally, expose it with <code>pnpm public</code>, then paste the printed HTTPS tunnel URL here.
+        </div>
+        {(localError || error) && <div className="toast-err" style={{ marginTop: 12 }}>{localError || error}</div>}
+      </div>
     </div>
   );
 }
@@ -1137,6 +1184,7 @@ function App() {
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!SERVER_CONFIGURED) return;
     fetchUsers().then(setUsers).catch((e) => setError(e.message));
     refreshFeed();
     fetchCampaigns().then(setCampaigns).catch(() => {});
@@ -1145,7 +1193,7 @@ function App() {
     if (payment === "success") setPaymentNotice("Payment received. Your balance will refresh after Stripe confirms it.");
     if (payment === "cancel") setPaymentNotice("Payment canceled. No credit was added.");
   }, []);
-  function refreshFeed() { fetchFeed().then(setFeed).catch((e) => setError(e.message)); }
+  function refreshFeed() { if (SERVER_CONFIGURED) fetchFeed().then(setFeed).catch((e) => setError(e.message)); }
 
   useEffect(() => {
     if (!me) return;
@@ -1206,6 +1254,7 @@ function App() {
     catch (e: any) { setError(e?.message ?? String(e)); } setSavingPrice(null);
   }
 
+  if (!SERVER_CONFIGURED) return <BackendSetup error={error} />;
   if (!me) return users.length ? <><Login users={users} onLogin={login} onError={setError} />{error && <div className="login"><div className="toast-err">{error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}</> : <div className="login"><div className="muted" style={{ padding: 40, textAlign: "center" }}>{error ?? "loading TempoFlow…"}</div></div>;
 
   const myClips = feed.filter((c) => c.ownerId === me.id);
