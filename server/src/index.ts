@@ -33,15 +33,21 @@ import {
   fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
-import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
+import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot, appCredit, appDebit } from "./app-ledger.js";
 import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, syncCheckoutSession } from "./stripe.js";
 import {
   userInsert, userUpdateProfile, type CampaignRow,
   followInsert, followRemove, isFollowing, followersOf, followingOf,
-  followerCount, followingCount, followEarnings,
+  followerCount, followingCount, followEarnings, clipSetLive,
+  goalInsert, goalById, goalsByCreator, goalSetStatus,
+  pledgeInsert, pledgesForGoal, pledgeSetStatus, goalPledgedUsd, goalBackerCount, viewerPledgedUsd,
+  type GoalRow,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
 import * as attention from "./attention.js";
+import { runAuction } from "./auction.js";
+import { streamAnswer, hasClaudeKey, charsToTokens } from "./ask.js";
+import * as live from "./live.js";
 
 const uploadsDir = resolve(dirname(fileURLToPath(import.meta.url)), "../uploads");
 const MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogg: "video/ogg", m4v: "video/mp4" };
@@ -137,6 +143,12 @@ app.use("*", async (c, next) => {
 
 // ── Read endpoints ──────────────────────────────────────────────────────────
 app.get("/health", (c) => c.json({ ok: true, service: "flow-server" }));
+/** The wallet's REAL on-chain pathUSD balance — single source of truth for money. */
+app.get("/onchain-balance", async (c) => {
+  const user = getUser(c.req.query("as") ?? "");
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  return c.json({ balance: await pathUsdBalance(user.address), currency: "pathUSD" });
+});
 app.get("/users", (c) => c.json({ users: users.map(publicUser) }));
 /** TESTNET ONLY: keys for the local account switcher. */
 app.get("/demo/users", (c) => c.json({ users }));
@@ -194,11 +206,11 @@ app.post("/demo/fund", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const user = getUser(String(b?.userId ?? ""));
   if (!user) return c.json({ error: "unknown user" }, 400);
-  // Demo faucet: credit spendable APP balance (so you can watch without Stripe) AND
-  // top up the on-chain pathUSD wallet (so MPP channels + payouts have real funds).
-  const { balance } = creditDemoFunds(user.id, 5);
+  // Testnet faucet → REAL on-chain pathUSD only (no fake credit). The displayed
+  // balance is the wallet's actual on-chain pathUSD.
   let tx: string | null = null;
-  try { tx = await fundWallet(user.address, "5"); } catch { /* faucet busy — app credit still applied */ }
+  try { tx = await fundWallet(user.address, "5"); } catch (e) { return c.json({ error: (e as Error).message }, 500); }
+  const balance = await pathUsdBalance(user.address);
   return c.json({ ok: true, tx, balance });
 });
 
@@ -303,6 +315,7 @@ app.get("/users/:id/profile", async (c) => {
     following,
     clips: getClips().filter((cl) => cl.ownerId === user.id),
     viewerFollows: viewer ? isFollowing(viewer, user.id) : false,
+    goals: goalsByCreator(user.id).map((g) => enrichGoal(g, viewer)),
   });
 });
 
@@ -518,7 +531,13 @@ app.post("/attention/session", async (c) => {
   const campaignId = String(b?.campaignId ?? "");
   const viewer = String(b?.viewer ?? "");
   if (!getCampaign(campaignId) || !getUser(viewer)) return c.json({ error: "bad campaignId/viewer" }, 400);
-  return c.json(attention.openSession(campaignId, viewer));
+  // rewardRate (optional): auction clearing price the viewer should EARN — overrides
+  // the campaign's own rate for crediting. Only honored if it doesn't exceed the
+  // campaign's bid (you can't earn more than the advertiser committed to pay).
+  const camp = getCampaign(campaignId)!;
+  const reward = Number(b?.rewardRate);
+  const rewardRate = Number.isFinite(reward) && reward > 0 ? Math.min(reward, Number(camp.pricePerSec)) : undefined;
+  return c.json(attention.openSession(campaignId, viewer, rewardRate));
 });
 
 // Heartbeat: carries the session token (L3) + live attention signals (L1). The
@@ -652,7 +671,9 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
           }
         }
         await stream.charge();
+        if (viewer) await appCredit(clip.ownerId, pricePerSec, "watch_earning", { clipId: clip.id, viewerId: viewer.id });
         ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
+        if (clip.live) { live.liveBeat(clip.id, viewer?.id ?? fromLabel); live.liveAddPaid(clip.id, pricePerSec); }
         yield JSON.stringify({ type: "tick", clipId: clip.id, second, spentUsd: +(second * pricePerSec).toFixed(6), creator: clip.creator });
         await sleep(1000);
       }
@@ -690,6 +711,9 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
   const fromAddr = company?.address ?? "0xadvertiser";
   stopRequested.delete(stopKey);
   const pricePerSec = Number(campaign.pricePerSec);
+  // Auction win → the viewer EARNS the clearing (second) price; the advertiser still
+  // pays their own bid into the channel, so the spread is the platform's.
+  const rewardRate = attention.getRewardRate(campaign.id, viewer.id) ?? pricePerSec;
   const budget = Number(campaign.maxBudget);
   return corsify(
     origin,
@@ -698,12 +722,12 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
       // The ad pays the viewer FROM THE ADVERTISER'S WALLET. It can only pay if
       // (a) there's committed budget left, and (b) the advertiser wallet holds
       // enough pathUSD. Either failing → pay nothing (channel refunds in full).
-      if (campaignRemaining(campaign) < pricePerSec) {
+      if (campaignRemaining(campaign) < rewardRate) {
         yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "budget" });
         return;
       }
       const advBalance = company ? getAppBalance(company.id) : 0;
-      if (advBalance < pricePerSec) {
+      if (advBalance < rewardRate) {
         yield JSON.stringify({ type: "unfunded", campaignId: campaign.id, reason: "wallet" });
         return;
       }
@@ -723,15 +747,15 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
           return;
         }
         // Cumulative funded-budget cap (shared across all viewers/sessions).
-        if (campaignRemaining(campaign) < pricePerSec) {
+        if (campaignRemaining(campaign) < rewardRate) {
           yield JSON.stringify({ type: "budget-exhausted", campaignId: campaign.id, paidUsd: paid });
           return;
         }
         if (attention.isAttentionFresh(campaign.id, viewer.id)) {
           await stream.charge(); // pulls pathUSD from the advertiser's channel/wallet
-          paid = +(paid + pricePerSec).toFixed(6);
-          await creditAdReward(viewer.id, 1, `${campaign.id}:${viewer.id}:${Math.floor(Date.now() / 1000)}`, { campaignId: campaign.id, rewardPerSecond: pricePerSec, advertiserId: company?.id });
-          ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: pricePerSec, contentId: campaign.id });
+          paid = +(paid + rewardRate).toFixed(6);
+          await creditAdReward(viewer.id, 1, `${campaign.id}:${viewer.id}:${Math.floor(Date.now() / 1000)}`, { campaignId: campaign.id, rewardPerSecond: rewardRate, advertiserId: company?.id });
+          ledger.record({ fromAddr, toAddr: viewer.address, fromLabel: campaign.advertiser, toLabel: viewer.name, amount: rewardRate, contentId: campaign.id });
           yield JSON.stringify({ type: "paid", campaignId: campaign.id, paidUsd: paid, remainingUsd: campaignRemaining(campaign), advertiser: campaign.advertiser, viewer: viewer.id });
         } else {
           // Present but looked away → keep the channel OPEN (no reopen cost), just
@@ -742,6 +766,165 @@ app.on(["GET", "POST"], "/attention/:campaignId/:viewerId", async (c) => {
       }
     }),
   );
+});
+
+// ── Feature 1: live tip "boost" (Viewer → Creator, on top of watchtime) ──────
+app.post("/tip", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const viewer = getUser(String(b?.as ?? ""));
+  const clip = getClip(String(b?.clipId ?? ""));
+  if (!viewer || !clip) return c.json({ error: "bad as/clipId" }, 400);
+  const amount = Math.min(1, Math.max(0, Number(b?.amountUsd)));
+  if (!(amount > 0)) return c.json({ error: "bad amount" }, 400);
+  const debit = appDebit(viewer.id, amount, "tip", { clipId: clip.id, creatorId: clip.ownerId });
+  if (!debit.ok) return c.json({ ok: false, reason: "insufficient_balance", balance: debit.balance }, 200);
+  appCredit(clip.ownerId, amount, "tip_earning", { clipId: clip.id, fromViewer: viewer.id });
+  const creator = getUser(clip.ownerId);
+  ledger.record({ fromAddr: viewer.address, toAddr: creator?.address ?? clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount, contentId: clip.id });
+  return c.json({ ok: true, balance: debit.balance, creator: clip.creator });
+});
+
+// ── Feature 2: real-time second-price attention auction ──────────────────────
+app.post("/auction/run", async (c) => {
+  const enriched = await Promise.all(getCampaigns().map(enrichCampaign));
+  return c.json(runAuction(enriched));
+});
+
+// ── Feature 3: "Ask this creator's AI" — pay-per-token, split to the creator ──
+app.post("/ask/:creatorId", async (c) => {
+  const creator = getUser(c.req.param("creatorId"));
+  const b = await c.req.json().catch(() => ({}));
+  const viewer = getUser(String(b?.as ?? ""));
+  const question = String(b?.question ?? "").slice(0, 500).trim();
+  if (!creator || !viewer || !question) return c.json({ error: "bad creatorId/as/question" }, 400);
+  const origin = c.req.header("origin") ?? "*";
+  const price = Number(PRICES.askPerToken);
+  const enc = new TextEncoder();
+  const send = (ctrl: ReadableStreamDefaultController, o: unknown) => ctrl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+
+  const stream = new ReadableStream({
+    async start(ctrl) {
+      try {
+        if (getAppBalance(viewer.id) < price) { send(ctrl, { type: "out-of-balance", balance: getAppBalance(viewer.id) }); ctrl.close(); return; }
+        send(ctrl, { type: "start", via: hasClaudeKey() ? "claude" : "canned", pricePerToken: price, creator: creator.name });
+        let chars = 0, billed = 0, costUsd = 0;
+        for await (const chunk of streamAnswer(creator.name, creator.bio, question)) {
+          chars += chunk.length;
+          const due = charsToTokens(chars) - billed;
+          if (due > 0) {
+            const cost = +(due * price).toFixed(6);
+            const debit = appDebit(viewer.id, cost, "ask", { creatorId: creator.id, tokens: due });
+            if (!debit.ok) { send(ctrl, { type: "out-of-balance", tokens: billed, costUsd, balance: debit.balance }); ctrl.close(); return; }
+            billed += due; costUsd = +(costUsd + cost).toFixed(6);
+            appCredit(creator.id, cost, "ask_earning", { viewerId: viewer.id });
+            ledger.record({ fromAddr: viewer.address, toAddr: creator.address, fromLabel: viewer.name, toLabel: creator.name, amount: cost, contentId: `ask:${creator.id}` });
+          }
+          send(ctrl, { type: "token", text: chunk });
+        }
+        send(ctrl, { type: "done", tokens: billed, costUsd, balance: getAppBalance(viewer.id) });
+        ctrl.close();
+      } catch (e) { try { send(ctrl, { type: "error", error: (e as Error).message }); } catch { /* closed */ } ctrl.close(); }
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-cache", "access-control-allow-origin": origin } });
+});
+
+// ── Feature 5: go-live (simulated) — a looping source + shared audience meter ─
+const LIVE_SOURCE = process.env.LIVE_SOURCE_URL ?? "https://media.w3.org/2010/05/bunny/trailer.mp4";
+app.post("/live/start", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const owner = getUser(String(b?.as ?? ""));
+  if (!owner) return c.json({ error: "unknown user" }, 400);
+  const tags = Array.isArray(b?.tags) ? b.tags : String(b?.tags ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
+  if (!tags.includes("live")) tags.push("live");
+  const clip = addClip({
+    ownerId: owner.id, title: String(b?.title ?? `${owner.name} — LIVE`), tags,
+    pricePerSec: normalizePrice(b?.pricePerSec), durationSec: 100000, // effectively endless
+    hasVideo: true, videoPath: LIVE_SOURCE, thumb: "🔴", live: true,
+  });
+  live.liveReset(clip.id);
+  return c.json({ clip });
+});
+app.post("/live/:id/stop", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  const b = await c.req.json().catch(() => ({}));
+  if (!clip) return c.json({ error: "not found" }, 404);
+  if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your stream" }, 403);
+  clipSetLive(id, false);
+  live.liveReset(id);
+  return c.json({ ok: true });
+});
+app.post("/live/:id/cheer", (c) => c.json({ applause: live.liveCheer(c.req.param("id")) }));
+app.get("/live/:id/stats", (c) => {
+  const clip = getClip(c.req.param("id"));
+  if (!clip) return c.json({ error: "not found" }, 404);
+  return c.json({ ...live.liveStats(clip.id, Number(clip.pricePerSec)), live: !!clip.live });
+});
+
+// ── Feature 4: creator funding goals (crowdfund with escrow + refund) ─────────
+/** Lazily resolve a goal: capture all escrowed pledges to the creator once the
+ *  target is met, or refund them all once the deadline passes. */
+function resolveGoal(g: GoalRow): GoalRow {
+  if (g.status !== "active") return g;
+  const pledged = goalPledgedUsd(g.id);
+  if (pledged + 1e-9 >= Number(g.targetUsd)) {
+    for (const p of pledgesForGoal(g.id)) {
+      if (p.status !== "escrowed") continue;
+      appCredit(g.creatorId, Number(p.amountUsd), "pledge_capture", { goalId: g.id, backerId: p.backerId });
+      const backer = getUser(p.backerId); const creator = getUser(g.creatorId);
+      if (backer && creator) ledger.record({ fromAddr: backer.address, toAddr: creator.address, fromLabel: backer.name, toLabel: creator.name, amount: Number(p.amountUsd), contentId: `goal:${g.id}` });
+      pledgeSetStatus(p.id, "captured");
+    }
+    goalSetStatus(g.id, "funded");
+    return { ...g, status: "funded" };
+  }
+  if (Date.now() > g.deadline) {
+    for (const p of pledgesForGoal(g.id)) {
+      if (p.status !== "escrowed") continue;
+      appCredit(p.backerId, Number(p.amountUsd), "pledge_refund", { goalId: g.id }); // escrow returns to the backer
+      pledgeSetStatus(p.id, "refunded");
+    }
+    goalSetStatus(g.id, "expired");
+    return { ...g, status: "expired" };
+  }
+  return g;
+}
+function enrichGoal(g: GoalRow, viewerId?: string) {
+  const r = resolveGoal(g);
+  return { ...r, pledgedUsd: goalPledgedUsd(r.id), backers: goalBackerCount(r.id), viewerPledgedUsd: viewerId ? viewerPledgedUsd(r.id, viewerId) : 0 };
+}
+app.get("/goals", (c) => {
+  const creator = c.req.query("creator");
+  const viewer = c.req.query("viewer") ?? undefined;
+  const rows = creator ? goalsByCreator(creator) : [];
+  return c.json({ goals: rows.map((g) => enrichGoal(g, viewer)) });
+});
+app.post("/goals", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const owner = getUser(String(b?.as ?? ""));
+  if (!owner) return c.json({ error: "unknown user" }, 400);
+  const target = Math.max(0.01, Number(b?.targetUsd) || 0);
+  const days = Math.max(0, Number(b?.days) || 0);
+  // Demo-friendly: 0 days → a short minute-scale deadline so the refund path is showable.
+  const ms = days > 0 ? days * 86_400_000 : Math.max(1, Number(b?.minutes) || 10) * 60_000;
+  const g: GoalRow = { id: `goal-${owner.id}-${Date.now().toString(36)}`, creatorId: owner.id, creator: owner.name, title: String(b?.title ?? "Funding goal").slice(0, 120), targetUsd: String(+target.toFixed(6)), deadline: Date.now() + ms, status: "active", createdAt: Date.now() };
+  goalInsert(g);
+  return c.json({ goal: enrichGoal(g, owner.id) });
+});
+app.post("/goals/:id/pledge", async (c) => {
+  const g = goalById(c.req.param("id"));
+  const b = await c.req.json().catch(() => ({}));
+  const backer = getUser(String(b?.as ?? ""));
+  if (!g || !backer) return c.json({ error: "bad goal/as" }, 400);
+  const resolved = resolveGoal(g);
+  if (resolved.status !== "active") return c.json({ ok: false, reason: resolved.status, goal: enrichGoal(resolved, backer.id) });
+  const amount = Math.min(1000, Math.max(0, Number(b?.amountUsd)));
+  if (!(amount > 0)) return c.json({ error: "bad amount" }, 400);
+  const debit = appDebit(backer.id, amount, "pledge", { goalId: g.id }); // funds held in escrow
+  if (!debit.ok) return c.json({ ok: false, reason: "insufficient_balance", balance: debit.balance });
+  pledgeInsert({ id: `pl-${backer.id}-${Date.now().toString(36)}`, goalId: g.id, backerId: backer.id, amountUsd: String(amount), status: "escrowed", createdAt: Date.now() });
+  return c.json({ ok: true, balance: debit.balance, goal: enrichGoal(g, backer.id) });
 });
 
 async function start() {

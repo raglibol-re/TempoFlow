@@ -72,17 +72,17 @@ export const getCampaign = (id: string) => campaignById(id);
 
 /** Creator posts a clip (optionally with an uploaded video file + a custom price). */
 export function addClip(input: {
-  ownerId: string; title: string; tags: string[]; durationSec?: number; pricePerSec?: string; hasVideo?: boolean; videoPath?: string; thumb?: string;
+  ownerId: string; title: string; tags: string[]; durationSec?: number; pricePerSec?: string; hasVideo?: boolean; videoPath?: string; thumb?: string; live?: boolean;
 }): Clip {
   const owner = getUser(input.ownerId);
   if (!owner) throw new Error("unknown owner");
-  const id = `clip-${owner.id}-${Date.now().toString(36)}`;
+  const id = `${input.live ? "live" : "clip"}-${owner.id}-${Date.now().toString(36)}`;
   const clip = {
     id, title: input.title, creator: owner.handle, ownerId: owner.id,
     tags: input.tags, durationSec: input.durationSec ?? 60, pricePerSec: input.pricePerSec ?? PRICES.creatorPerSecond,
     recipients: [{ recipient: owner.address, percentage: 100, label: owner.handle }],
     hasVideo: !!input.hasVideo, videoPath: input.videoPath, thumb: input.thumb ?? owner.avatar,
-    createdAt: Date.now(),
+    live: !!input.live, createdAt: Date.now(),
   };
   clipInsert(clip);
   const { videoPath, createdAt, ...pub } = clip as any;
