@@ -179,6 +179,11 @@ export function ledgerInsert(tx: LedgerTransaction): boolean {
       tx.metadata ? JSON.stringify(tx.metadata) : null, tx.createdAt, tx.confirmedAt ?? null);
   return res.changes > 0;
 }
+/** Record the on-chain Tempo settlement tx hash on a ledger row (e.g. after a
+ *  Stripe top-up is bridged to pathUSD). */
+export function ledgerSetTempoTx(id: string, tempoTransactionId: string): void {
+  db.prepare("UPDATE ledger_transactions SET tempoTransactionId=? WHERE id=?").run(tempoTransactionId, id);
+}
 export function ledgerByStripe(sessionId?: string | null, paymentIntentId?: string | null): LedgerTransaction | undefined {
   const r = sessionId
     ? db.prepare("SELECT * FROM ledger_transactions WHERE stripeCheckoutSessionId=?").get(sessionId)

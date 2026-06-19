@@ -26,9 +26,11 @@ import { randomBytes } from "node:crypto";
 const HEARTBEAT_TTL_MS = 2500; // a "fresh" (attentive) beat must be newer than this
 const PRESENCE_TTL_MS = 20000; // viewer is "still here" if ANY beat arrived this recently
                                // (look-away keeps beating; only truly leaving stops it)
-const ANSWER_MS = 6000; // grace window to respond to a challenge (still paid during it)
-const CHALLENGE_MIN_GAP_MS = 8000; // soonest the next challenge may appear
-const CHALLENGE_MAX_GAP_MS = 16000; // latest
+const ANSWER_MS = 12000; // generous grace window to respond to a challenge (still paid during it)
+// Keep the human-proof check RARE so it doesn't nag the viewer — at most once a
+// minute, often not at all during a short ad. (Was 8–16s, which was far too pushy.)
+const CHALLENGE_MIN_GAP_MS = 60000; // soonest the next challenge may appear (~1 min)
+const CHALLENGE_MAX_GAP_MS = 120000; // latest (~2 min)
 
 export interface Challenge {
   id: string; // unpredictable token the client must echo back

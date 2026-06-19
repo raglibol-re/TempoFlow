@@ -85,6 +85,27 @@ export async function pathUsdBalance(address: Address): Promise<number> {
 }
 
 /**
+ * Transfer EXACTLY `amountUsd` pathUSD from the funding-master treasury wallet to
+ * `to`, on-chain. Used to settle a Stripe fiat top-up into real spendable pathUSD
+ * on Tempo (the fiat→stablecoin on-ramp). Returns the tx hash, or null if no
+ * `FUNDING_MASTER_PRIVATE_KEY` treasury is configured. ⚠️ TESTNET ONLY.
+ */
+export async function transferPathUsd(to: Address, amountUsd: string): Promise<string | null> {
+  const masterKey = process.env.FUNDING_MASTER_PRIVATE_KEY as `0x${string}` | undefined;
+  if (!masterKey) return null;
+  const master = privateKeyToAccount(masterKey);
+  const wallet = createWalletClient({ account: master, chain: tempoTestnet as any, transport: http() });
+  const hash = await wallet.writeContract({
+    address: FLOW_CURRENCY,
+    abi: ERC20_TRANSFER_ABI,
+    functionName: "transfer",
+    args: [to, parseUnits(amountUsd, 6)],
+    chain: tempoTestnet as any,
+  });
+  return hash;
+}
+
+/**
  * Fund a wallet with testnet tokens (pathUSD + fee token).
  *
  * Primary path: the Tempo testnet faucet precompile via the `tempo_fundAddress`

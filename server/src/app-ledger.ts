@@ -5,6 +5,7 @@ import {
   ledgerConfirmedSumByMetadata,
   ledgerForUser,
   ledgerInsert,
+  ledgerSetTempoTx,
   userUpdateBilling,
   type LedgerTransaction,
 } from "./db.js";
@@ -68,9 +69,26 @@ export function creditStripeTopup(input: {
     confirmedAt: now,
   };
   const inserted = ledgerInsert(tx);
-  if (inserted) void settleStripeTopupToTempo(input.userId, input.amount);
+  if (inserted) {
+    // Bridge the fiat top-up to real pathUSD on Tempo, then stamp the on-chain tx
+    // onto this ledger row so the UI can show "settled on Tempo · tx 0x…".
+    settleStripeTopupToTempo(input.userId, input.amount)
+      .then((res) => { if (res.tempoTransactionId) ledgerSetTempoTx(tx.id, res.tempoTransactionId); })
+      .catch((e) => console.error("[ledger] tempo settlement error:", (e as Error).message));
+  }
   getAppBalance(input.userId);
   return { inserted, transaction: tx };
+}
+
+/** Demo faucet → spendable app credit (so you can watch without configuring Stripe).
+ *  Recorded as a confirmed 'adjustment' credit. ⚠️ TESTNET / demo only. */
+export function creditDemoFunds(userId: string, amount: number): { balance: number } {
+  const now = Date.now();
+  ledgerInsert({
+    id: txId("lt"), userId, type: "adjustment", amount: money(amount), currency: APP_CURRENCY,
+    direction: "credit", status: "confirmed", metadata: { source: "demo_faucet" }, createdAt: now, confirmedAt: now,
+  });
+  return { balance: getAppBalance(userId) };
 }
 
 export async function chargeForStreamingSeconds(userId: string, seconds: number, opts: { clipId: string; pricePerSecond: number; creatorId?: string; mppTransactionId?: string }) {

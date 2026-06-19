@@ -33,7 +33,7 @@ import {
   fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
-import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
+import { chargeForStreamingSeconds, creditAdReward, creditDemoFunds, getAppBalance, getLedgerSnapshot } from "./app-ledger.js";
 import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, syncCheckoutSession } from "./stripe.js";
 import {
   userInsert, userUpdateProfile, type CampaignRow,
@@ -194,13 +194,12 @@ app.post("/demo/fund", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const user = getUser(String(b?.userId ?? ""));
   if (!user) return c.json({ error: "unknown user" }, 400);
-  try {
-    const tx = await fundWallet(user.address, "5");
-    const balance = await pathUsdBalance(user.address);
-    return c.json({ ok: true, tx, balance });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 500);
-  }
+  // Demo faucet: credit spendable APP balance (so you can watch without Stripe) AND
+  // top up the on-chain pathUSD wallet (so MPP channels + payouts have real funds).
+  const { balance } = creditDemoFunds(user.id, 5);
+  let tx: string | null = null;
+  try { tx = await fundWallet(user.address, "5"); } catch { /* faucet busy — app credit still applied */ }
+  return c.json({ ok: true, tx, balance });
 });
 
 app.post("/api/stripe/create-topup-checkout-session", async (c) => {

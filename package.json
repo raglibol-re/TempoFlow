@@ -8,6 +8,8 @@
     "dev": "concurrently -k -n server,web -c blue,magenta \"pnpm dev:server\" \"pnpm dev:web\"",
     "dev:server": "pnpm --filter @flow/server dev",
     "dev:web": "pnpm --filter @flow/web dev",
+    "tunnel": "npx -y cloudflared tunnel --url http://localhost:3000",
+    "public": "concurrently -k -n server,tunnel -c blue,green \"pnpm dev:server\" \"pnpm tunnel\"",
     "agent:curator": "pnpm --filter @flow/agent curator",
     "agent:advertiser": "pnpm --filter @flow/agent advertiser",
     "wallets:setup": "pnpm --filter @flow/shared wallets:setup",

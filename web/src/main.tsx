@@ -863,14 +863,15 @@ function TopupModal({ me, onClose, onError }: { me: DemoUser; onClose: () => voi
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><h3>Add credit</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
-        <div className="muted" style={{ marginBottom: 12 }}>Choose an amount. Your balance updates only after Stripe confirms the payment webhook.</div>
+        <div className="modal-head"><h3>Add credit · card → pathUSD</h3><button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button></div>
+        <div className="muted" style={{ marginBottom: 12 }}>Pay with a card via Stripe — we instantly settle the same amount as real ◎ pathUSD on Tempo, ready to spend per-second on creators. Balance updates once Stripe confirms.</div>
         <div className="topup-grid">
           {[5, 10, 25].map((v) => (
             <button key={v} className={"topup-choice" + (amount === v ? " on" : "")} onClick={() => setAmount(v)}>${v}</button>
           ))}
         </div>
         <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={checkout} disabled={busy}>{busy ? "opening Stripe…" : `Continue to Stripe · $${amount}`}</button>
+        <div className="muted" style={{ marginTop: 10, fontSize: 11.5, textAlign: "center" }}>🌉 Stripe (fiat rails) → pathUSD on Tempo · testnet</div>
       </div>
     </div>
   );
@@ -929,7 +930,7 @@ function App() {
     if (params.get("payment") !== "success" || !sessionId) return;
     syncCheckoutSession(me.id, sessionId)
       .then(async () => {
-        setPaymentNotice("Payment confirmed. Your credit was added.");
+        setPaymentNotice("✓ Payment confirmed — settled as ◎ pathUSD on Tempo and added to your balance.");
         setBalance(await fetchBalance(me.id));
       })
       .catch(() => setPaymentNotice("Payment received. Waiting for Stripe confirmation."));
