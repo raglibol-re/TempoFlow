@@ -11,10 +11,15 @@
   },
   "dependencies": {
     "@flow/shared": "workspace:*",
+    "@tsparticles/engine": "^4.2.1",
+    "@tsparticles/react": "^4.2.1",
+    "@tsparticles/slim": "^4.2.1",
+    "clsx": "^2.1.1",
     "framer-motion": "^11.5.0",
     "mppx": "^0.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.6.0",
     "viem": "^2.52.0",
     "zustand": "^4.5.0"
   },
@@ -23,6 +28,9 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }

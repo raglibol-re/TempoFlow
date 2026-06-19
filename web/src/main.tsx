@@ -151,7 +151,7 @@ function VideoCard({ clip, owner, onOpen, onProfile }: { clip: Clip; owner?: Pub
 
 // ───────────────────────── watch view (payment panel) ─────────────────────────
 const LOW_CAP = 0.012;
-function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void }) {
+function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, onTopup }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void; balance: number | null; onTopup: () => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing">("idle");
   const [spent, setSpent] = useState(0);
   const [secs, setSecs] = useState(0);
@@ -253,9 +253,9 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile }: { clip: 
                 </div>
               </div>
             )}
-            {phase === "idle" && <div className="ov">▶ Click the video or press “Watch” — you’ll pay {usd(Number(clip.pricePerSec))}/sec to the creator</div>}
+            {phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
             {phase === "opening" && <div className="ov">starting stream…</div>}
-            {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of funds — payment stopped, so playback stopped." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
+            {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
@@ -1006,7 +1006,7 @@ function App() {
       {view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
         : view === "watch" && current
-        ? <WatchView key={current.id} clip={current} me={me} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
+        ? <WatchView key={current.id} clip={current} me={me} balance={balance} onTopup={() => setTopupOpen(true)} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
         : view === "earn" && activeAd
         ? <AdWatch key={activeAd.id} ad={activeAd} me={me} onBack={() => setAdCampaign(null)} onProfile={openProfile} />
         : (

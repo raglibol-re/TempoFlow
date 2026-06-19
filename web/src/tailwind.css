@@ -1,0 +1,5 @@
+/* Tailwind layers. Preflight (the global reset) is disabled in tailwind.config.js
+   so this only adds component/utility classes alongside the existing styles.css. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
