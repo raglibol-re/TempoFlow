@@ -19,10 +19,11 @@
 | `/tip` | POST | free | — | **Feature 1.** `{as, clipId, amountUsd}` → debits viewer app credit, credits the creator, records a net flow. Called once/sec while "boost" is on, or one-shot | no |
 | `/auction/run` | POST | free | — | **Feature 2.** `{viewer}` → runs a second-price (Vickrey) auction over funded campaigns → `{winner, clearingUsd, reserveUsd, bids[]}` | no |
 | `/ask/:creatorId` | POST (NDJSON) | `$0.0008`/token | **Creator** | **Feature 3.** `{as, question}` → streams a Claude answer token-by-token; bills the viewer per token, splits to the creator. Lines: `{type:"start"\|"token"\|"done"\|"out-of-balance"\|"error", …}`. Falls back to a canned stream with no `ANTHROPIC_API_KEY` | yes (`x-payment-info`, `unitType:"token"`) |
-| `/live/start` | POST | free | — | **Feature 5.** `{as, title, tags?, pricePerSec?}` → creates a LIVE clip (looping source) → `{clip}` | no |
-| `/live/:id/stop` | POST | free | — | `{as}` (owner) → ends the stream (clears the live flag + meter) | no |
+| `/live/start` | POST | free | — | **Feature 5.** `{as, title, tags?, pricePerSec?}` → creates a LIVE clip (looping source); marks the creator present → `{clip}` | no |
+| `/live/:id/host-beat` | POST | free | — | `{as}` (owner) → **creator presence pulse**. A stream stays live ONLY while these arrive (~5s cadence); if they lapse (>15s) the stream auto-ends | owner |
+| `/live/:id/stop` | POST | free | — | `{as}` (owner) → ends the stream. A live clip is **ephemeral**: ending it removes it from the feed (not left as a dead video) | owner |
 | `/live/:id/cheer` | POST | free | — | 👏 → `{applause}` (cumulative) | no |
-| `/live/:id/stats` | GET | free | — | `{live, viewers, perSecUsd, totalUsd, applause}` — shared real-time audience meter | no |
+| `/live/:id/stats` | GET | free | — | `{live, viewers, perSecUsd, totalUsd, applause, ended?}` — shared real-time audience meter. Auto-ends (and reports `ended:true`) once the creator has left | no |
 | `/goals` | GET / POST | free | — | **Feature 4.** GET `?creator=&viewer=` → goals (lazily resolved). POST `{as, title, targetUsd, minutes?}` → create a funding goal | no |
 | `/goals/:id/pledge` | POST | free | — | `{as, amountUsd}` → escrows the pledge (debits backer). Auto-captures to the creator when the target is met; auto-refunds all pledges if the deadline passes unmet | no |
 | `/feed` | GET | free | — | list clips (all channels) | no |
@@ -30,11 +31,18 @@
 | `/users` | GET | free | — | public user list (no keys) — roles: viewer/creator/advertiser/admin | no |
 | `/demo/users` | GET | free | — | **TESTNET demo only**: users incl. keys (login) | no |
 | `/clips` | POST | free | — | JSON `{as,title,tags}` OR **multipart** (`as,title,tags,durationSec,video`=file) → creator posts/uploads a clip | no |
+| `/clips/:id/edit` | POST | free | — | `{as, title, tags}` (owner) → edit a clip's title + tags (creator dashboard) → `{clip}` | owner |
+| `/clips/:id/delete` | POST | free | — | `{as}` (owner) → delete a clip + its uploaded file (creator dashboard) → `{ok, id}` | owner |
+| `/wallet/export` | GET | free | — | `?as=<userId>` → **TESTNET ONLY**: the user's own Tempo private key `{address, key}` so they can take their wallet out (import into a Tempo wallet/explorer) | self |
 | `/video/:clipId` | GET | free | — | streams the uploaded video file with **HTTP range** support (for `<video>`) | no |
 | `/demo/fund` | POST | free | — | `{userId}` → faucet test funds to that user's wallet (returns balance) | no |
 | `/admin/users` | GET | free | — | all users + live on-chain pathUSD balances (admin dashboard) | no |
-| `/campaigns` | POST | free | — | `{as, tags}` → company creates a campaign | no |
-| `/demo/run-ad` | POST | free | — | `{campaignId, viewerId}` → spawns the advertiser agent to pay that viewer (in-browser ad demo) | no |
+| `/campaigns` | POST | free | — | `{as, tags}` (or multipart `as,title,tags,video,budget`) → company creates a campaign; **starts UNFUNDED** (`maxBudget=0`) until escrowed | no |
+| `/escrow-address` | GET | free | — | the platform **escrow/vault address** (the operator wallet) advertisers deposit pathUSD into to fund ads → `{address}` | no |
+| `/campaigns/:id/fund` | POST | free | — | **records an on-chain escrow deposit**: `{as, amountUsd, txHash}` — the client has already transferred `amountUsd` pathUSD from the advertiser's wallet to the escrow address; raises the committed budget + stores `escrowTx` → `{maxBudget, escrowTx}` | owner |
+| `/campaigns/:id/stop` | POST | free | — | **stops + refunds**: `{as}` → operator transfers the **unspent escrow** (committed − spent) back to the advertiser **on-chain**, caps budget at spent, marks stopped → `{spentUsd, refundedUsd, refundTx}` | owner |
+| `/demo/run-ad` | POST | free | — | `{campaignId, viewerId}` → spawns the advertiser agent to pay that viewer **from the escrow** (in-browser ad demo) | no |
+| `/onchain-balance` | GET | free | — | `?as=<userId>` or `?address=` → that wallet's **real on-chain pathUSD balance** (the source of truth for all displayed balances) → `{balance, currency:"pathUSD"}` | no |
 | `/net` | GET | free | — | `?as=<userId>` or `?address=` → that wallet's `{inUsd,outUsd,netUsd,events[]}` | no |
 | `/reset` | POST | free | — | clear the in-memory net ledger (demo) | no |
 | `/openapi.json` | GET | free | — | discovery doc (validated) | self |
@@ -43,6 +51,15 @@
 Supabase. Roles: viewer/creator/advertiser/admin. The server settles every channel as the
 **operator**, so it pays out to any creator/viewer wallet. `/watch/:id?as=<viewerId>` pays the
 clip's creator; `/attention/:campaignId/:viewerId` pays that viewer (company = payer). Uploaded
+
+**Advertiser escrow (real on-chain):** the **operator wallet doubles as the ad escrow/vault**
+(`/escrow-address`). To fund an ad, the advertiser's browser transfers pathUSD to that address
+on-chain, then `POST /campaigns/:id/fund` records the deposit (raising the committed budget). The
+ad pays viewers from the escrow per proven second (`adrunner` spawns the advertiser agent with
+`--escrow`, paying as the operator). `POST /campaigns/:id/stop` refunds the **unspent** budget
+(committed − spent) operator→advertiser **on-chain** and caps the budget at what was spent, so no
+further payouts can occur. All three legs — deposit, payout, refund — are real Tempo transactions.
+
 videos are stored on disk (`server/uploads/`) + path in SQLite, served at `/video/:clipId`.
 The web `<video>` is **payment-gated**: it pauses if the per-second payment stops. The
 Home tab has a **"Low-funds demo"** toggle that caps the channel (`maxDeposit≈0.012`) so

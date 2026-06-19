@@ -13,10 +13,10 @@ import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
-  fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, setClipPrice, watchClip,
+  fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, createTopupCheckoutSession, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats,
+  sendTip, runAuction, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, updateClipMeta, deleteClip,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
   type Profile as ProfileData, type PublicUser, type Goal, type AuctionResult, type LiveStats, type AskEvent,
 } from "./flow";
@@ -222,12 +222,17 @@ function TipBoost({ me, clip, active, onTipped }: { me: DemoUser; clip: Clip; ac
 }
 
 // ───────────────────────── live meter + cheer (Feature 5) ─────────────────
-function LiveMeter({ clipId }: { clipId: string }) {
+function LiveMeter({ clipId, onEnded }: { clipId: string; onEnded?: () => void }) {
   const [stats, setStats] = useState<LiveStats | null>(null);
   const [applause, setApplause] = useState(0);
+  const endedFired = useRef(false);
   useEffect(() => {
     let on = true;
-    const tick = () => fetchLiveStats(clipId).then((s) => { if (on) { setStats(s); setApplause((a) => Math.max(a, s.applause)); } }).catch(() => {});
+    const tick = () => fetchLiveStats(clipId).then((s) => {
+      if (!on) return;
+      setStats(s); setApplause((a) => Math.max(a, s.applause));
+      if (s.ended && !endedFired.current) { endedFired.current = true; onEnded?.(); }
+    }).catch(() => {});
     tick(); const id = setInterval(tick, 1500); return () => { on = false; clearInterval(id); };
   }, [clipId]);
   const cheer = async () => { setApplause((a) => a + 1); await cheerLive(clipId); };
@@ -237,6 +242,45 @@ function LiveMeter({ clipId }: { clipId: string }) {
       <div className="statline"><span className="k">combined</span><span style={{ color: "var(--in)" }}>{usd(stats?.perSecUsd ?? 0)}/sec → creator</span></div>
       <div className="statline"><span className="k">this stream</span><span>{usd(stats?.totalUsd ?? 0)}</span></div>
       <button className="btn btn-ghost btn-sm cheer-btn" onClick={cheer}>👏 Cheer · {applause}</button>
+    </div>
+  );
+}
+
+/** The creator's own LIVE view. The stream stays live only while the host is on this
+ *  page (heartbeats); leaving the page or hitting End ends it (and the server sweeps
+ *  it away if the host vanishes). Distinct from watching a regular video. */
+function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser; onBack: () => void; onEnded: () => void }) {
+  const [ending, setEnding] = useState(false);
+  useEffect(() => {
+    let on = true;
+    const beat = () => { if (on) void liveHostBeat(clip.id, me.id); };
+    beat(); const id = setInterval(beat, 5000);
+    const onUnload = () => endLiveBeacon(clip.id, me.id);
+    window.addEventListener("beforeunload", onUnload);
+    // NOTE: no stopLive on unmount (StrictMode double-invokes cleanups) — when the
+    // host leaves, heartbeats stop and the server sweep ends the stream within ~15s.
+    return () => { on = false; clearInterval(id); window.removeEventListener("beforeunload", onUnload); };
+  }, [clip.id, me.id]);
+  async function end(then: () => void) { setEnding(true); await stopLive(clip.id, me.id); then(); }
+  return (
+    <div className="page">
+      <div className="backbar"><button className="btn-ghost btn btn-sm" onClick={() => end(onBack)}>← Back (ends stream)</button><span className="muted">you’re live · hosting</span></div>
+      <div className="watch">
+        <div>
+          <div className="player">
+            {clip.hasVideo ? <video src={videoSrc(clip.id)} autoPlay loop muted playsInline /> : <span className="emoji">🔴</span>}
+            <span className="live-badge player-live">● LIVE</span>
+          </div>
+          <div className="w-title">{clip.title}</div>
+          <div className="w-chan"><div className="a">🔴</div><div><b>@{clip.creator}</b><div className="muted" style={{ fontSize: 12.5 }}>your live stream · viewers pay you per second</div></div></div>
+          <div className="receipt" style={{ marginTop: 12 }}>You’re the host. The stream is live while you’re on this page and <b>ends automatically if you leave</b>. Each viewer pays you on-chain per second — watch it add up in the meter.</div>
+        </div>
+        <div className="panel">
+          <h3><span className="livedot on" /> your live stream</h3>
+          <LiveMeter clipId={clip.id} />
+          <button className="btn" style={{ width: "100%", marginTop: 12, background: "var(--out)", borderColor: "var(--out)" }} onClick={() => end(onEnded)} disabled={ending}>{ending ? "ending…" : "■ End stream"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -367,6 +411,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [spent, setSpent] = useState(0);
   const [secs, setSecs] = useState(0);
   const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
+  const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [summary, setSummary] = useState<CloseSummary | null>(null);
   const [low, setLow] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -467,9 +512,10 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
                 </div>
               </div>
             )}
-            {phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
-            {phase === "opening" && <div className="ov">starting stream…</div>}
-            {phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
+            {streamEnded && <div className="ov">🔴 Stream ended — the creator left the live.</div>}
+            {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
+            {!streamEnded && phase === "opening" && <div className="ov">starting stream…</div>}
+            {!streamEnded && phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
           </div>
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
@@ -482,7 +528,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
         {/* payment panel */}
         <div className="panel">
           <h3><span className={"livedot" + (live ? " on" : "")} /> pay-per-second → creator</h3>
-          {clip.live && <LiveMeter clipId={clip.id} />}
+          {clip.live && <LiveMeter clipId={clip.id} onEnded={() => { setStreamEnded(true); if (handle.current) void closeOut("ended"); }} />}
           <div className="bignum out">− {usd(spent)}</div>
           <div className="statline"><span className="k">rate</span><span>{usd(Number(clip.pricePerSec))}/sec</span></div>
           <div className="statline"><span className="k">watched</span><span>{secs}s</span></div>
@@ -962,14 +1008,30 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
 
 // ───────────────────────── app ─────────────────────────
 // ───────────────────────── account menu (profile + logout) ─────────────────────────
+const shortAddr = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
+
 function AccountMenu({ me, balance, onProfile, onTopup, onLogout }: { me: DemoUser; balance: number | null; onProfile: () => void; onTopup: () => void; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<"" | "addr" | "key">("");
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [loadingKey, setLoadingKey] = useState(false);
+  const [keyErr, setKeyErr] = useState("");
+  const copy = async (text: string, what: "addr" | "key") => {
+    try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(""), 1400); } catch { /* clipboard blocked */ }
+  };
+  async function revealKey() {
+    if (revealed) { setRevealed(null); return; }
+    setLoadingKey(true); setKeyErr("");
+    try { const r = await exportPrivateKey(me.id); setRevealed(r.key); }
+    catch (e: any) { setKeyErr(e?.message ?? "could not load key"); }
+    setLoadingKey(false);
+  }
   return (
     <div className="acct">
       <Avatar user={me} size={34} onClick={() => setOpen((o) => !o)} />
       {open && (
         <>
-          <div className="acct-backdrop" onClick={() => setOpen(false)} />
+          <div className="acct-backdrop" onClick={() => { setOpen(false); setRevealed(null); }} />
           <div className="acct-menu">
             <div className="acct-head">
               <Avatar user={me} size={42} />
@@ -978,10 +1040,29 @@ function AccountMenu({ me, balance, onProfile, onTopup, onLogout }: { me: DemoUs
                 <div className="muted" style={{ fontSize: 12 }}>@{me.handle}</div>
               </div>
             </div>
-            <div className="acct-row"><span className="k">balance</span><span><b>{balance != null ? fmtBal(balance) : "…"}</b></span></div>
+            <div className="acct-row"><span className="k">on-chain balance</span><span><b>{balance != null ? fmtBal(balance) : "…"}</b> <span className="muted" style={{ fontSize: 11 }}>pathUSD</span></span></div>
+            <div className="acct-row">
+              <span className="k">wallet</span>
+              <button className="linkbtn mono" title="copy full address" onClick={() => copy(me.address, "addr")}>{copied === "addr" ? "✓ copied" : shortAddr(me.address)}</button>
+            </div>
             <div className="acct-sep" />
+            <a className="acct-item" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer">🔎 View wallet on Tempo explorer ↗</a>
+            <a className="acct-item" href={tempoAppUrl} target="_blank" rel="noreferrer">⚡ Open the Tempo app ↗</a>
             <button className="acct-item" onClick={() => { setOpen(false); onProfile(); }}>👤 View profile</button>
-            <button className="acct-item" onClick={() => { setOpen(false); onTopup(); }}>＋ Add credit</button>
+            <button className="acct-item" onClick={() => { setOpen(false); onTopup(); }}>＋ Add funds (card → pathUSD)</button>
+            <div className="acct-sep" />
+            <button className="acct-item" onClick={revealKey} disabled={loadingKey}>{loadingKey ? "…" : revealed ? "🙈 Hide private key" : "🔑 Export private key"}</button>
+            {keyErr && <div className="muted" style={{ fontSize: 11, color: "var(--out)", padding: "0 12px 6px" }}>{keyErr}</div>}
+            {revealed && (
+              <div style={{ padding: "0 12px 10px" }}>
+                <div className="mono" style={{ fontSize: 10.5, wordBreak: "break-all", background: "#0003", padding: "7px 8px", borderRadius: 7, lineHeight: 1.5 }}>{revealed}</div>
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  <button className="btn btn-sm" onClick={() => copy(revealed, "key")}>{copied === "key" ? "✓ copied" : "Copy key"}</button>
+                  <span className="muted" style={{ fontSize: 10.5, lineHeight: 1.35 }}>⚠️ TESTNET key — import it into a Tempo wallet. Never share a mainnet key.</span>
+                </div>
+              </div>
+            )}
+            <div className="acct-sep" />
             <button className="acct-item danger" onClick={() => { setOpen(false); onLogout(); }}>⎋ Log out</button>
           </div>
         </>
@@ -1132,8 +1213,14 @@ function App() {
   const [title, setTitle] = useState(""); const [tags, setTags] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
   const [price, setPrice] = useState("0.002"); // creator-set price ($/sec) for new uploads
   const [priceEdits, setPriceEdits] = useState<Record<string, string>>({}); const [savingPrice, setSavingPrice] = useState<string | null>(null);
+  const [editingClip, setEditingClip] = useState<string | null>(null);
+  const [titleEdit, setTitleEdit] = useState(""); const [tagEdit, setTagEdit] = useState("");
+  const [savingMeta, setSavingMeta] = useState(false); const [deletingClip, setDeletingClip] = useState<string | null>(null);
   // ad studio (advertiser upload)
   const [adTitle, setAdTitle] = useState(""); const [adTags, setAdTags] = useState(""); const [adFile, setAdFile] = useState<File | null>(null); const [adBudget, setAdBudget] = useState("0.20"); const [publishingAd, setPublishingAd] = useState(false); const [fundingAd, setFundingAd] = useState<string | null>(null);
+  const [stoppingAd, setStoppingAd] = useState<string | null>(null);
+  const [fundAmt, setFundAmt] = useState<Record<string, string>>({});
+  const [adTx, setAdTx] = useState<Record<string, { kind: "escrow" | "refund"; tx?: string; amountUsd?: number }>>({});
   const [profileId, setProfileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1177,13 +1264,43 @@ function App() {
   function onMeUpdate(u: Partial<DemoUser>) { setMe((m) => { if (!m) return m; const merged = { ...m, ...u }; localStorage.setItem("tempoflow-me", JSON.stringify(merged)); return merged; }); }
   async function submitAd() {
     if (!me || !adTitle.trim()) return; setPublishingAd(true);
-    try { await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, Number(adBudget) || 0); setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setCampaigns(await fetchCampaigns()); }
+    try {
+      // Create the ad UNFUNDED (no phantom budget), then escrow the initial amount
+      // on-chain so its committed budget reflects real, refundable deposited funds.
+      const ad = await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, 0);
+      const initial = Number(adBudget);
+      if (initial > 0) {
+        const r = await fundCampaign(me, ad.id, initial);
+        setAdTx((m) => ({ ...m, [ad.id]: { kind: "escrow", tx: r.escrowTx, amountUsd: initial } }));
+      }
+      setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setCampaigns(await fetchCampaigns()); setBalance(await fetchBalance(me.id));
+    }
     catch (e: any) { setError(e?.message ?? String(e)); } setPublishingAd(false);
   }
   async function doFundAd(id: string) {
+    if (!me) return;
+    const amt = Number(fundAmt[id] ?? "0.20");
+    if (!(amt > 0)) { setError("enter an amount greater than 0 to escrow"); return; }
     setFundingAd(id);
-    try { await fundCampaign(id, 0.2); setCampaigns(await fetchCampaigns()); if (me) setBalance(await fetchBalance(me.id)); }
-    catch (e: any) { setError(e?.message ?? String(e)); } setFundingAd(null);
+    try {
+      const r = await fundCampaign(me, id, amt);
+      setAdTx((m) => ({ ...m, [id]: { kind: "escrow", tx: r.escrowTx, amountUsd: amt } }));
+      setCampaigns(await fetchCampaigns());
+      setBalance(await fetchBalance(me.id));
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    setFundingAd(null);
+  }
+  async function doStopAd(id: string) {
+    if (!me) return;
+    if (!confirm("Stop this campaign and refund the unspent escrow to your wallet?")) return;
+    setStoppingAd(id);
+    try {
+      const r = await stopCampaign(me, id);
+      setAdTx((m) => ({ ...m, [id]: { kind: "refund", tx: r.refundTx, amountUsd: r.refundedUsd } }));
+      setCampaigns(await fetchCampaigns());
+      setBalance(await fetchBalance(me.id));
+    } catch (e: any) { setError(e?.message ?? String(e)); }
+    setStoppingAd(null);
   }
   async function getFunds() { if (!me) return; setFunding(true); try { await fundUser(me.id); setBalance(await fetchBalance(me.id)); } catch (e: any) { setError(e?.message); } setFunding(false); }
   async function submitUpload() {
@@ -1204,6 +1321,17 @@ function App() {
     if (!me) return; const v = priceEdits[id]; if (v == null) return; setSavingPrice(id);
     try { const updated = await setClipPrice(id, me.id, v); setFeed((fd) => fd.map((c) => (c.id === id ? updated : c))); setPriceEdits((p) => { const nx = { ...p }; delete nx[id]; return nx; }); }
     catch (e: any) { setError(e?.message ?? String(e)); } setSavingPrice(null);
+  }
+  function startEditClip(c: Clip) { setEditingClip(c.id); setTitleEdit(c.title); setTagEdit(c.tags.join(", ")); }
+  async function saveClipMeta(id: string) {
+    if (!me) return; setSavingMeta(true);
+    try { const updated = await updateClipMeta(id, me.id, titleEdit.trim(), tagEdit.split(",").map((t) => t.trim()).filter(Boolean)); setFeed((fd) => fd.map((c) => (c.id === id ? updated : c))); setEditingClip(null); }
+    catch (e: any) { setError(e?.message ?? String(e)); } setSavingMeta(false);
+  }
+  async function doDeleteClip(id: string) {
+    if (!me) return; if (!confirm("Delete this video? This can’t be undone.")) return; setDeletingClip(id);
+    try { await deleteClip(id, me.id); setFeed((fd) => fd.filter((c) => c.id !== id)); if (current?.id === id) setCurrent(null); }
+    catch (e: any) { setError(e?.message ?? String(e)); } setDeletingClip(null);
   }
 
   if (!me) return users.length ? <><Login users={users} onLogin={login} onError={setError} />{error && <div className="login"><div className="toast-err">{error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}</> : <div className="login"><div className="muted" style={{ padding: 40, textAlign: "center" }}>{error ?? "loading TempoFlow…"}</div></div>;
@@ -1246,9 +1374,10 @@ function App() {
           onOpenClip={(clip) => { setCurrent(clip); setAdCampaign(null); setProfileId(null); setView("watch"); }}
         />
         <div className="nav-right">
-          <span className="pill" title="your app balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>credit</span></span>
+          <span className="pill" title="your real on-chain pathUSD balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
-          <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Add credit</button>
+          <a className="pill mono addr-pill" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`${me.address} — view your wallet on the Tempo explorer`} style={{ textDecoration: "none" }}>{shortAddr(me.address)} ↗</a>
+          <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Add funds</button>
           <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onTopup={() => setTopupOpen(true)} onLogout={logout} />
         </div>
       </div>
@@ -1260,7 +1389,9 @@ function App() {
       {view === "profile" && profileId
         ? <ProfileView key={profileId} id={profileId} me={me} onBack={() => go("home")} onOpenProfile={openProfile} onWatch={(c) => { setCurrent(c); setView("watch"); }} onError={setError} onMeUpdate={onMeUpdate} onBalance={() => fetchBalance(me.id).then(setBalance).catch(() => {})} onLogout={logout} />
         : view === "watch" && current
-        ? <WatchView key={current.id} clip={current} me={me} balance={balance} onTopup={() => setTopupOpen(true)} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />
+        ? (current.live && current.ownerId === me.id
+            ? <HostLiveView key={current.id} clip={current} me={me} onBack={() => go("home")} onEnded={() => { go("home"); refreshFeed(); }} />
+            : <WatchView key={current.id} clip={current} me={me} balance={balance} onTopup={() => setTopupOpen(true)} onBack={() => go("home")} onProfile={openProfile} onError={setError} onSettled={() => { fetchNet(me.id).then(setNet).catch(() => {}); fetchBalance(me.id).then(setBalance).catch(() => {}); }} />)
         : view === "earn" && activeAd
         ? <AdWatch key={activeAd.id} ad={activeAd} me={me} rewardRate={auctionRate} onBack={() => { setAdCampaign(null); setAuctionRate(null); }} onProfile={openProfile} />
         : (
@@ -1301,21 +1432,38 @@ function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {myClips.map((c) => {
                     const edited = priceEdits[c.id] ?? c.pricePerSec;
+                    const isEditing = editingClip === c.id;
                     return (
-                      <div key={c.id} className="adrow" style={{ borderLeftColor: "var(--accent)" }}>
-                        <div className="adrow-thumb" style={{ cursor: "pointer" }} onClick={() => { setCurrent(c); setView("watch"); }}>
+                      <div key={c.id} className="adrow" style={{ borderLeftColor: c.live ? "var(--out)" : "var(--accent)" }}>
+                        <div className="adrow-thumb" style={{ cursor: "pointer", position: "relative" }} onClick={() => { setCurrent(c); setView("watch"); }}>
                           {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "🎬"}</span>}
+                          {c.live && <span className="live-badge" style={{ position: "absolute", top: 4, left: 4 }}>● LIVE</span>}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700 }}>{c.title}</div>
-                          <div className="muted" style={{ fontSize: 12 }}>{c.tags.join(", ") || "untagged"} · {c.durationSec}s</div>
-                          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>viewers pay <b style={{ color: "var(--out)" }}>{usd(Number(c.pricePerSec))}/sec</b> · ≈ {usd(Number(c.pricePerSec) * c.durationSec)} for the full clip</div>
+                          {isEditing ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <input className="input" value={titleEdit} onChange={(e) => setTitleEdit(e.target.value)} placeholder="title" />
+                              <input className="input" value={tagEdit} onChange={(e) => setTagEdit(e.target.value)} placeholder="tags (comma separated)" />
+                            </div>
+                          ) : (<>
+                            <div style={{ fontWeight: 700 }}>{c.live ? "🔴 " : ""}{c.title}</div>
+                            <div className="muted" style={{ fontSize: 12 }}>{c.tags.join(", ") || "untagged"}{c.live ? " · live now" : ` · ${c.durationSec}s`}</div>
+                            {!c.live && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>viewers pay <b style={{ color: "var(--out)" }}>{usd(Number(c.pricePerSec))}/sec</b> · ≈ {usd(Number(c.pricePerSec) * c.durationSec)} for the full clip</div>}
+                          </>)}
                         </div>
                         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          <span className="muted" style={{ fontSize: 12 }}>$</span>
-                          <input className="input" type="number" step="0.001" min="0" style={{ width: 88 }} value={edited} onChange={(e) => setPriceEdits((p) => ({ ...p, [c.id]: e.target.value }))} />
-                          <span className="muted" style={{ fontSize: 12 }}>/sec</span>
-                          <button className="btn btn-sm" onClick={() => savePrice(c.id)} disabled={savingPrice === c.id || edited === c.pricePerSec || !(Number(edited) > 0)}>{savingPrice === c.id ? "…" : "Save price"}</button>
+                          {c.live ? (
+                            <button className="btn btn-sm" onClick={() => { setCurrent(c); setView("watch"); }} title="open your live stream">open live ↗</button>
+                          ) : isEditing ? (<>
+                            <button className="btn btn-sm" onClick={() => saveClipMeta(c.id)} disabled={savingMeta || !titleEdit.trim()}>{savingMeta ? "…" : "Save"}</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEditingClip(null)}>Cancel</button>
+                          </>) : (<>
+                            <span className="muted" style={{ fontSize: 12 }}>$</span>
+                            <input className="input" type="number" step="0.001" min="0" style={{ width: 76 }} value={edited} onChange={(e) => setPriceEdits((p) => ({ ...p, [c.id]: e.target.value }))} />
+                            <button className="btn btn-sm" onClick={() => savePrice(c.id)} disabled={savingPrice === c.id || edited === c.pricePerSec || !(Number(edited) > 0)}>{savingPrice === c.id ? "…" : "Save price"}</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => startEditClip(c)} title="edit title & tags">✎ Edit</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => doDeleteClip(c.id)} disabled={deletingClip === c.id} title="delete video" style={{ color: "var(--out)" }}>{deletingClip === c.id ? "…" : "🗑"}</button>
+                          </>)}
                         </div>
                       </div>
                     );
@@ -1367,10 +1515,10 @@ function App() {
                   <input className="input" placeholder="tags (comma separated)" value={adTags} onChange={(e) => setAdTags(e.target.value)} />
                   <input className="input" type="file" accept="video/*" onChange={(e) => setAdFile(e.target.files?.[0] ?? null)} />
                   <div className="row">
-                    <input className="input" type="number" step="0.05" min="0" placeholder="budget $" value={adBudget} onChange={(e) => setAdBudget(e.target.value)} style={{ flex: 1 }} />
-                    <button className="btn" onClick={submitAd} disabled={!adTitle.trim() || publishingAd}>{publishingAd ? "publishing…" : "⬆ Publish ad"}</button>
+                    <input className="input" type="number" step="0.05" min="0" placeholder="escrow $" value={adBudget} onChange={(e) => setAdBudget(e.target.value)} style={{ flex: 1 }} />
+                    <button className="btn" onClick={submitAd} disabled={!adTitle.trim() || publishingAd}>{publishingAd ? "escrowing…" : "⬆ Publish + escrow"}</button>
                   </div>
-                  <div className="muted" style={{ fontSize: 12 }}>Budget is your committed spend cap. Add app credit from the top bar when you need more.</div>
+                  <div className="muted" style={{ fontSize: 12 }}>Publishing escrows that amount of <b>pathUSD</b> from your wallet on-chain into the platform vault. It pays viewers per second of proven attention; whatever isn’t spent is refunded to you when you stop the campaign.</div>
                 </div>
               </div>
               <div className="section-title">Your ads ({myAds.length})</div>
@@ -1379,6 +1527,8 @@ function App() {
                   const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget), left = Math.max(0, budget - spent);
                   const funded = c.funded ?? left >= Number(c.pricePerSec);
                   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+                  const stopped = !!c.stopped;
+                  const tx = adTx[c.id];
                   return (
                     <div key={c.id} className="adrow">
                       <div className="adrow-thumb ad">
@@ -1389,12 +1539,20 @@ function App() {
                         <div style={{ fontWeight: 700 }}>{c.title ?? c.id}</div>
                         <div className="muted" style={{ fontSize: 12 }}>{usd(Number(c.pricePerSec))}/sec · {c.tags.join(", ") || "untargeted"}</div>
                         <div className="bar" style={{ marginTop: 7 }}><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--out),#ff9356)" }} /></div>
-                        <div className="statline" style={{ marginTop: 5 }}><span className="k">funded budget</span><span>{usd(spent)} / {usd(budget)} · {usd(left)} left</span></div>
-                        <div className="statline"><span className="k">available app credit</span><span>{c.advertiserBalance != null ? fmtBal(c.advertiserBalance) : "…"}</span></div>
+                        <div className="statline" style={{ marginTop: 5 }}><span className="k">escrowed on-chain</span><span><b>{usd(budget)}</b></span></div>
+                        <div className="statline"><span className="k">paid to viewers</span><span>{usd(spent)}</span></div>
+                        <div className="statline"><span className="k">refundable</span><span style={{ color: "var(--in)" }}>{usd(left)}</span></div>
+                        {c.escrowTx && <div className="statline"><span className="k">escrow tx</span><a href={explorerTxUrl(c.escrowTx)} target="_blank" rel="noreferrer" className="mono">{c.escrowTx.slice(0, 10)}…↗</a></div>}
+                        {c.refundTx && <div className="statline"><span className="k">refund tx</span><a href={explorerTxUrl(c.refundTx)} target="_blank" rel="noreferrer" className="mono">{c.refundTx.slice(0, 10)}…↗</a></div>}
+                        {tx?.tx && !c.escrowTx && !c.refundTx && <div className="statline"><span className="k">{tx.kind === "refund" ? "refund tx" : "escrow tx"}</span><a href={explorerTxUrl(tx.tx)} target="_blank" rel="noreferrer" className="mono">{tx.tx.slice(0, 10)}…↗</a></div>}
                       </div>
-                      <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                        <span className={"chip " + (funded ? "chip-ok" : "chip-bad")}>{funded ? "✓ funded" : "⛔ unfunded"}</span>
-                        <button className="btn btn-faucet btn-sm" onClick={() => doFundAd(c.id)} disabled={fundingAd === c.id}>{fundingAd === c.id ? "funding…" : "＋ Fund $0.20"}</button>
+                      <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", minWidth: 150 }}>
+                        <span className={"chip " + (stopped ? "chip-bad" : funded ? "chip-ok" : "chip-bad")}>{stopped ? "■ stopped" : funded ? "✓ live · paying" : "⛔ unfunded"}</span>
+                        <div className="row" style={{ gap: 4 }}>
+                          <input className="input" type="number" step="0.05" min="0" placeholder="0.20" value={fundAmt[c.id] ?? ""} onChange={(e) => setFundAmt((m) => ({ ...m, [c.id]: e.target.value }))} style={{ width: 64, padding: "5px 7px" }} />
+                          <button className="btn btn-faucet btn-sm" onClick={() => doFundAd(c.id)} disabled={fundingAd === c.id}>{fundingAd === c.id ? "escrowing…" : "＋ Escrow"}</button>
+                        </div>
+                        <button className="btn btn-sm" onClick={() => doStopAd(c.id)} disabled={stoppingAd === c.id || left <= 0} title={left <= 0 ? "nothing left to refund" : "stop paying + refund the unspent escrow to your wallet"}>{stoppingAd === c.id ? "refunding…" : "■ Stop + refund"}</button>
                       </div>
                     </div>
                   );

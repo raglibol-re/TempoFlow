@@ -45,7 +45,9 @@ export function runAd(campaignId: string, viewerId: string) {
     // idleStop is a long backstop only — the SERVER tears the channel down promptly
     // when the viewer truly leaves (no heartbeats). A look-away keeps the channel
     // open so payment resumes instantly, so we must NOT close on mere no-payment.
-    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--campaign", campaign.id, "--idleStop", "120000", "--budget", String(remaining)],
+    // --escrow: pay viewers from the platform operator escrow (which holds the
+    // advertiser's funded budget) so the unspent remainder is refundable on stop.
+    ["tsx", "src/advertiser.ts", "--as", company.id, "--to", viewer.id, "--campaign", campaign.id, "--escrow", "--idleStop", "120000", "--budget", String(remaining)],
     { cwd: agentDir, env: process.env, stdio: ["ignore", "pipe", "pipe"], shell: true },
   );
   procs.set(key, child);

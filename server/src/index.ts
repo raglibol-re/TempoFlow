@@ -14,12 +14,18 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { generate } from "mppx/discovery";
 import { parseUnits } from "viem";
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { FLOW_CURRENCY, TOKEN_DECIMALS, TEMPO_CHAIN_ID, TEMPO_RPC_URL, PRICES, createWallet, fundWallet, pathUsdBalance, type Campaign } from "@flow/shared";
-import { mppx, operatorAddress } from "./config.js";
+import { mppx, operatorAddress, settlementClient } from "./config.js";
+import { tempoTestnet } from "@flow/shared";
+
+/** Minimal ERC-20 transfer ABI for on-chain pathUSD refunds from the operator escrow. */
+const ERC20_TRANSFER_ABI = [
+  { type: "function", name: "transfer", stateMutability: "nonpayable", inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }] },
+] as const;
 import { initUsers, users, getUser, publicUser, reloadUsers } from "./users.js";
 import {
   initContent,
@@ -29,8 +35,9 @@ import {
   getCampaign,
   addClip,
   setClipPrice,
+  updateClipMeta,
+  deleteClip,
   addCampaign,
-  fundCampaign,
 } from "./content.js";
 import * as ledger from "./ledger.js";
 import { chargeForStreamingSeconds, creditAdReward, getAppBalance, getLedgerSnapshot, appCredit, appDebit } from "./app-ledger.js";
@@ -38,9 +45,10 @@ import { createTopupCheckoutSession, handleStripeWebhook, resolveTopupAmount, sy
 import {
   userInsert, userUpdateProfile, type CampaignRow,
   followInsert, followRemove, isFollowing, followersOf, followingOf,
-  followerCount, followingCount, followEarnings, clipSetLive,
+  followerCount, followingCount, followEarnings,
   goalInsert, goalById, goalsByCreator, goalSetStatus,
   pledgeInsert, pledgesForGoal, pledgeSetStatus, goalPledgedUsd, goalBackerCount, viewerPledgedUsd,
+  campaignAddEscrow, campaignStop,
   type GoalRow,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
@@ -76,14 +84,15 @@ async function saveUploadedImage(file: File): Promise<string> {
 /** Remaining funded budget for an ad (committed budget − already paid out). */
 const campaignRemaining = (camp: CampaignRow) => +(Number(camp.maxBudget) - ledger.spentOn(camp.id)).toFixed(6);
 
-/** Enrich an ad with funding status for the API (spent/remaining/funded + wallet). */
+/** Enrich an ad with funding status for the API. `spentUsd` is summed from the
+ *  on-chain payout ledger and `maxBudget` is the on-chain escrowed budget, so
+ *  remaining = refundable escrow. An ad can pay iff it has unspent escrow AND is
+ *  not stopped. No app-ledger / demo balances — all figures are real on-chain. */
 async function enrichCampaign(camp: CampaignRow): Promise<Campaign> {
   const spentUsd = ledger.spentOn(camp.id);
   const remainingUsd = +(Number(camp.maxBudget) - spentUsd).toFixed(6);
-  const company = getUser(camp.ownerId);
-  const advertiserBalance = company ? getAppBalance(company.id) : 0;
   const { videoPath, ...pub } = camp;
-  return { ...pub, spentUsd, remainingUsd, advertiserBalance, funded: remainingUsd >= Number(camp.pricePerSec) };
+  return { ...pub, spentUsd, remainingUsd, funded: remainingUsd >= Number(camp.pricePerSec) && !camp.stopped };
 }
 
 const app = new Hono();
@@ -148,6 +157,18 @@ app.get("/onchain-balance", async (c) => {
   const user = getUser(c.req.query("as") ?? "");
   if (!user) return c.json({ error: "unknown user" }, 400);
   return c.json({ balance: await pathUsdBalance(user.address), currency: "pathUSD" });
+});
+/** The on-chain escrow address advertisers fund their ads into (the operator
+ *  wallet). It pays viewers and refunds the unspent budget on stop. */
+app.get("/escrow-address", (c) => c.json({ address: operatorAddress, balance: undefined }));
+/** TESTNET ONLY: export the requesting user's own Tempo private key so they can
+ *  take their wallet out of the app (import it into a Tempo wallet / explorer). The
+ *  app holds testnet keys to auto-pay ads; this just hands the user back their own. */
+app.get("/wallet/export", (c) => {
+  const user = getUser(c.req.query("as") ?? "");
+  if (!user) return c.json({ error: "unknown user" }, 400);
+  if (!user.key) return c.json({ error: "no key on file for this account" }, 404);
+  return c.json({ address: user.address, key: user.key });
 });
 app.get("/users", (c) => c.json({ users: users.map(publicUser) }));
 /** TESTNET ONLY: keys for the local account switcher. */
@@ -441,6 +462,35 @@ app.post("/clips/:id/price", async (c) => {
   return c.json({ clip: setClipPrice(id, price) });
 });
 
+/** Creator dashboard: edit a clip's title + tags (owner only). */
+app.post("/clips/:id/edit", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  if (!clip) return c.json({ error: "clip not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your clip" }, 403);
+  const title = String(b?.title ?? clip.title).trim().slice(0, 140) || clip.title;
+  const tags = Array.isArray(b?.tags) ? b.tags.map((t: any) => String(t).trim()).filter(Boolean)
+    : String(b?.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return c.json({ clip: updateClipMeta(id, title, tags) });
+});
+
+/** Creator dashboard: delete a clip (owner only). Ends any live session + removes
+ *  the uploaded video file. */
+app.post("/clips/:id/delete", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  if (!clip) return c.json({ error: "clip not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your clip" }, 403);
+  if (clip.live) live.liveReset(id);
+  const videoPath = deleteClip(id);
+  if (videoPath && !isRemoteVideo(videoPath)) {
+    try { unlinkSync(join(uploadsDir, videoPath)); } catch { /* file already gone */ }
+  }
+  return c.json({ ok: true, id });
+});
+
 // ── Serve uploaded video (HTTP range support for <video>) — clips AND ads ────
 app.get("/video/:id", (c) => {
   const id = c.req.param("id");
@@ -511,19 +561,58 @@ app.post("/campaigns", async (c) => {
   return c.json({ campaign });
 });
 
-/** Fund an ad: faucet the advertiser's WALLET (so it can actually pay) AND raise
- *  the committed budget cap. One click = "this ad is now funded". */
+/** Record an advertiser's ON-CHAIN escrow deposit into an ad's budget. The web app
+ *  has ALREADY transferred `amountUsd` pathUSD from the advertiser's wallet to the
+ *  platform escrow (the operator address, see GET /escrow-address) and passes the
+ *  resulting `txHash`. Here we credit the committed budget and store that tx so the
+ *  unspent remainder can be refunded on stop. Real money, escrowed on-chain. */
 app.post("/campaigns/:id/fund", async (c) => {
   const id = c.req.param("id");
   const camp = getCampaign(id);
   if (!camp) return c.json({ error: "campaign not found" }, 404);
   const b = await c.req.json().catch(() => ({}));
-  const addUsd = Number(b?.amountUsd) > 0 ? Number(b.amountUsd) : 0.2;
-  const company = getUser(camp.ownerId);
-  const balance = company ? getAppBalance(company.id) : 0;
-  const tx: string | undefined = undefined;
-  const maxBudget = fundCampaign(id, addUsd);
-  return c.json({ ok: true, id, maxBudget, balance, tx });
+  if (String(b?.as ?? "") !== camp.ownerId) return c.json({ error: "not your ad" }, 403);
+  const addUsd = Number(b?.amountUsd);
+  if (!Number.isFinite(addUsd) || addUsd <= 0) return c.json({ error: "amount must be > 0" }, 400);
+  const escrowTx = typeof b?.txHash === "string" ? b.txHash : "";
+  const newMax = (+(Number(camp.maxBudget) + addUsd).toFixed(6)).toString();
+  campaignAddEscrow(id, newMax, escrowTx);
+  console.log(`[escrow] ${camp.advertiser} funded ${id} +$${addUsd} → budget $${newMax} (tx ${escrowTx || "?"})`);
+  const balance = await pathUsdBalance(operatorAddress); // escrow holdings
+  return c.json({ ok: true, id, maxBudget: newMax, escrowTx, escrowBalance: balance });
+});
+
+/** Stop a campaign and REFUND the unspent escrow to the advertiser, ON-CHAIN. The
+ *  operator (escrow holder) transfers the remaining budget (committed − spent) back
+ *  to the advertiser's wallet, caps the budget at what was spent (so no further
+ *  payouts can occur), and marks the campaign stopped. Real on-chain refund. */
+app.post("/campaigns/:id/stop", async (c) => {
+  const id = c.req.param("id");
+  const camp = getCampaign(id);
+  if (!camp) return c.json({ error: "campaign not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  if (String(b?.as ?? "") !== camp.ownerId) return c.json({ error: "not your ad" }, 403);
+  const advertiser = getUser(camp.ownerId);
+  const spent = +ledger.spentOn(id).toFixed(6);
+  const refund = +(Number(camp.maxBudget) - spent).toFixed(6);
+  let refundTx: string | null = null;
+  if (refund > 0 && advertiser) {
+    try {
+      refundTx = await settlementClient.writeContract({
+        address: FLOW_CURRENCY,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: "transfer",
+        args: [advertiser.address, parseUnits(refund.toFixed(6), TOKEN_DECIMALS)],
+        chain: tempoTestnet as any,
+      });
+      console.log(`[escrow] refunded $${refund} to ${advertiser.name} (${advertiser.address}) tx ${refundTx}`);
+    } catch (e) {
+      console.error(`[escrow] refund FAILED for ${id}:`, (e as Error).message);
+      return c.json({ error: "refund failed: " + (e as Error).message }, 500);
+    }
+  }
+  campaignStop(id, spent.toFixed(6), refundTx);
+  return c.json({ ok: true, id, spentUsd: spent, refundedUsd: refund, refundTx });
 });
 
 // ── Attention proofing (gate input) ─────────────────────────────────────────
@@ -671,6 +760,9 @@ app.on(["GET", "POST"], "/watch/:id", async (c) => {
           stopRequested.delete(clip.id);
           return;
         }
+        // A LIVE stream only pays while the creator is present. If they've left
+        // (host beats lapsed), the stream has ended — stop charging the viewer.
+        if (clip.live && !live.hostPresent(clip.id)) return;
         await stream.charge(); // REAL on-chain pathUSD: viewer's channel → creator (operator-settled, refunded on close)
         ledger.record({ fromAddr, toAddr: creatorAddr, fromLabel, toLabel: clip.creator, amount: pricePerSec, contentId: clip.id });
         if (clip.live) { live.liveBeat(clip.id, viewer?.id ?? fromLabel); live.liveAddPaid(clip.id, pricePerSec); }
@@ -831,6 +923,13 @@ app.post("/ask/:creatorId", async (c) => {
 
 // ── Feature 5: go-live (simulated) — a looping source + shared audience meter ─
 const LIVE_SOURCE = process.env.LIVE_SOURCE_URL ?? "https://media.w3.org/2010/05/bunny/trailer.mp4";
+/** End a live stream: a live clip is EPHEMERAL (it loops a source while the creator
+ *  is present), so ending it removes it from the feed entirely rather than leaving a
+ *  dead "video". Clears the shared room too. */
+function endLive(clipId: string) {
+  live.liveReset(clipId);
+  deleteClip(clipId);
+}
 app.post("/live/start", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const owner = getUser(String(b?.as ?? ""));
@@ -843,24 +942,51 @@ app.post("/live/start", async (c) => {
     hasVideo: true, videoPath: LIVE_SOURCE, thumb: "🔴", live: true,
   });
   live.liveReset(clip.id);
+  live.hostBeat(clip.id); // creator is present from the moment they go live
   return c.json({ clip });
+});
+/** Host presence pulse — the creator's browser sends this every few seconds while
+ *  they're in their own stream. The stream stays live only as long as these arrive. */
+app.post("/live/:id/host-beat", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  if (!clip) return c.json({ ok: false, live: false, ended: true });
+  const b = await c.req.json().catch(() => ({}));
+  if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your stream" }, 403);
+  live.hostBeat(id);
+  return c.json({ ok: true, live: true });
 });
 app.post("/live/:id/stop", async (c) => {
   const id = c.req.param("id");
   const clip = getClip(id);
   const b = await c.req.json().catch(() => ({}));
-  if (!clip) return c.json({ error: "not found" }, 404);
+  if (!clip) return c.json({ ok: true }); // already gone
   if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your stream" }, 403);
-  clipSetLive(id, false);
-  live.liveReset(id);
+  endLive(id);
   return c.json({ ok: true });
 });
 app.post("/live/:id/cheer", (c) => c.json({ applause: live.liveCheer(c.req.param("id")) }));
 app.get("/live/:id/stats", (c) => {
   const clip = getClip(c.req.param("id"));
-  if (!clip) return c.json({ error: "not found" }, 404);
-  return c.json({ ...live.liveStats(clip.id, Number(clip.pricePerSec)), live: !!clip.live });
+  // Stream gone (deleted) OR the creator has left → report ended so viewers stop.
+  if (!clip || !clip.live) return c.json({ live: false, ended: true, viewers: 0, perSecUsd: 0, totalUsd: 0, applause: 0 });
+  if (!live.hostPresent(clip.id)) {
+    endLive(clip.id);
+    return c.json({ live: false, ended: true, viewers: 0, perSecUsd: 0, totalUsd: 0, applause: 0 });
+  }
+  return c.json({ ...live.liveStats(clip.id, Number(clip.pricePerSec)), live: true });
 });
+// Background sweep: a live stream only exists while its host is present. End (remove)
+// any live clip whose creator has left — even with no viewers polling — so stale live
+// clips never linger (also clears leftovers after a server restart).
+setInterval(() => {
+  for (const clip of getClips()) {
+    if (clip.live && !live.hostPresent(clip.id)) {
+      console.log(`[live] ${clip.id} — host gone, ending stream`);
+      endLive(clip.id);
+    }
+  }
+}, 8000).unref?.();
 
 // ── Feature 4: creator funding goals (crowdfund with escrow + refund) ─────────
 /** Lazily resolve a goal: capture all escrowed pledges to the creator once the

@@ -9,18 +9,35 @@
  */
 
 const PRESENCE_MS = 4000;
+/** A live stream is only "live" while its HOST (the creator) is present. The host's
+ *  browser pulses every few seconds; if no host beat arrives for this long, the
+ *  stream is considered ended (the creator left). Tolerates a couple of missed beats. */
+const HOST_TTL_MS = 15000;
 
 interface LiveRoom {
   viewers: Map<string, number>; // viewerId → last-beat ms
   totalUsd: number; // total paid to the creator this session
   applause: number; // cumulative cheers
+  lastHostBeat: number; // ms epoch of the creator's last presence pulse
 }
 
 const rooms = new Map<string, LiveRoom>();
 function room(clipId: string): LiveRoom {
   let r = rooms.get(clipId);
-  if (!r) { r = { viewers: new Map(), totalUsd: 0, applause: 0 }; rooms.set(clipId, r); }
+  if (!r) { r = { viewers: new Map(), totalUsd: 0, applause: 0, lastHostBeat: 0 }; rooms.set(clipId, r); }
   return r;
+}
+
+/** Mark the creator (host) present — call on go-live and on every host pulse. */
+export function hostBeat(clipId: string): void {
+  room(clipId).lastHostBeat = Date.now();
+}
+
+/** Is the creator currently present in their stream? False once host beats lapse. */
+export function hostPresent(clipId: string): boolean {
+  const r = rooms.get(clipId);
+  if (!r || !r.lastHostBeat) return false;
+  return Date.now() - r.lastHostBeat <= HOST_TTL_MS;
 }
 
 /** Mark a viewer present (called once per paid second they watch). */

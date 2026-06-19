@@ -23,6 +23,7 @@ import {
   fetchDemoUsers,
   runPaidStream,
   SpendPolicy,
+  requireKey,
 } from "./lib.js";
 import type { Campaign } from "@flow/shared";
 
@@ -42,8 +43,12 @@ async function main() {
   const company = (f.as ? all.find((u) => u.id === f.as) : undefined) ?? all.find((u) => u.role === "advertiser");
   const target = (f.to ? all.find((u) => u.id === f.to) : undefined) ?? all.find((u) => u.role === "viewer");
   if (!company || !target) throw new Error("need an advertiser + a viewer user on the server");
-  if (!company.key) throw new Error(`advertiser ${company.id} has no server-side key — cannot pay from its wallet`);
-  const { manager } = makeManager(company.key, "2"); // generous escrow; unspent refunds on close
+  // Escrow mode: the platform OPERATOR holds the advertiser's escrowed budget and
+  // pays the viewer from it, so the unspent remainder can be refunded to the
+  // advertiser on stop. Otherwise the advertiser's own wallet pays directly.
+  const payerKey = f.escrow ? requireKey("CREATOR_PRIVATE_KEY") : company.key;
+  if (!payerKey) throw new Error(`no payer key for ${company.id} (escrow=${!!f.escrow})`);
+  const { manager } = makeManager(payerKey, "2"); // generous escrow; unspent refunds on close
   const policy = new SpendPolicy(BUDGET, MAX_PER_MIN);
   log.info(`advertiser acting as ${company.name} → paying viewer ${target.name}`, { budget: BUDGET, targetTags: TARGET_TAGS });
 

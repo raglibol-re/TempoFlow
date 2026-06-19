@@ -74,7 +74,8 @@ db.exec(`
 
 // Migrate pre-existing DBs (added ad-video + funding columns). Each ALTER throws
 // if the column already exists — ignore that.
-for (const col of ["title TEXT", "hasVideo INTEGER DEFAULT 0", "videoPath TEXT", "thumb TEXT"]) {
+for (const col of ["title TEXT", "hasVideo INTEGER DEFAULT 0", "videoPath TEXT", "thumb TEXT",
+  "stopped INTEGER DEFAULT 0", "escrowTx TEXT", "refundTx TEXT"]) {
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN ${col}`); } catch { /* already present */ }
 }
 // Profile columns on users (creator-platform fields). Same ignore-if-exists migrate.
@@ -294,6 +295,17 @@ export function clipSetLive(id: string, live: boolean) {
 export function clipSetVideo(id: string, videoPath: string, thumb?: string) {
   db.prepare("UPDATE clips SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);
 }
+/** Edit a clip's title + tags (creator dashboard). */
+export function clipUpdateMeta(id: string, title: string, tags: string[]) {
+  db.prepare("UPDATE clips SET title=?, tags=? WHERE id=?").run(title, JSON.stringify(tags), id);
+}
+/** Delete a clip (creator dashboard). Returns the deleted row's videoPath (if any)
+ *  so the caller can remove the uploaded file. */
+export function clipDelete(id: string): string | undefined {
+  const r = db.prepare("SELECT videoPath FROM clips WHERE id=?").get(id) as any;
+  db.prepare("DELETE FROM clips WHERE id=?").run(id);
+  return r?.videoPath || undefined;
+}
 
 // ── Campaigns (ads) ──────────────────────────────────────────────────────────
 export type CampaignRow = Campaign & { videoPath?: string };
@@ -302,6 +314,7 @@ function rowToCampaign(r: any): CampaignRow {
     id: r.id, advertiser: r.advertiser, ownerId: r.ownerId, title: r.title || undefined,
     tags: JSON.parse(r.tags || "[]"), pricePerSec: r.pricePerSec, maxBudget: r.maxBudget,
     hasVideo: !!r.hasVideo, videoPath: r.videoPath || undefined, thumb: r.thumb || undefined,
+    stopped: !!r.stopped, escrowTx: r.escrowTx || undefined, refundTx: r.refundTx || undefined,
   };
 }
 export function campaignsCount(): number {
@@ -324,6 +337,16 @@ export function campaignInsert(c: CampaignRow) {
 /** Raise an ad's funded budget cap (advertiser tops up funding). */
 export function campaignSetBudget(id: string, maxBudget: string) {
   db.prepare("UPDATE campaigns SET maxBudget=? WHERE id=?").run(maxBudget, id);
+}
+/** Record an advertiser's on-chain escrow deposit: raise the funded budget + store
+ *  the deposit tx, and (re)open the campaign. */
+export function campaignAddEscrow(id: string, newMaxBudget: string, escrowTx: string) {
+  db.prepare("UPDATE campaigns SET maxBudget=?, escrowTx=?, stopped=0 WHERE id=?").run(newMaxBudget, escrowTx, id);
+}
+/** Stop a campaign: record the refund tx and cap the budget at what was already
+ *  spent (so no further payouts), marking it stopped. */
+export function campaignStop(id: string, spentBudget: string, refundTx: string | null) {
+  db.prepare("UPDATE campaigns SET stopped=1, maxBudget=?, refundTx=? WHERE id=?").run(spentBudget, refundTx, id);
 }
 export function campaignSetVideo(id: string, videoPath: string, thumb?: string) {
   db.prepare("UPDATE campaigns SET hasVideo=1, videoPath=?, thumb=COALESCE(?, thumb) WHERE id=?").run(videoPath, thumb ?? null, id);

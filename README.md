@@ -58,7 +58,8 @@ trustlessly** — applied to a different surface. See [ADR-011](docs/06-decision
 | **Attention auction** | Advertisers bid for your attention; the **highest bid wins** the slot but you're paid the **second-highest price** (Vickrey). | A real, transparent price-discovery market on attention — honest bidding is optimal. |
 | **Ask a creator's AI** | Chat a creator's AI persona, billed **per generated token**, revenue split to the creator. | `unitType: "token"` — the machine-payments story (real Claude API streaming, falls back to a canned answer offline). |
 | **Crowdfund goals** | Back a creator's funding goal; pledges are **escrowed** and only captured if the goal is reached, else **auto-refunded** at the deadline. | Trustless Kickstarter on the escrow + refund primitive. |
-| **Go live** | Creators stream live; every viewer pays per second and a **shared real-time meter** shows concurrent watchers, combined `$/sec`, and 👏 cheers. | Many simultaneous per-second payers into one aggregated audience. |
+| **Advertiser escrow + refund** | An advertiser **escrows real pathUSD on-chain** into the platform vault to fund an ad; the ad pays viewers per proven second from that escrow; when the advertiser hits **Stop**, the **unspent remainder is refunded on-chain** to their wallet (and the budget is capped at what was actually spent). | Pay-as-watched ad budgets on the escrow + refund primitive — every deposit, payout, and refund is a real on-chain tx, linked to the block explorer in the Ad Studio. |
+| **Go live** | Creators stream live; every viewer pays per second and a **shared real-time meter** shows concurrent watchers, combined `$/sec`, and 👏 cheers. The stream is **live only while the creator is present** — when they leave it ends automatically (and disappears from the feed), so viewers never pay for an absent host. | Many simultaneous per-second payers into one aggregated audience, gated on host presence. |
 
 Find them in the app: **Earn → ⚡ Live attention auction**; the **watch page** (tip boost; live
 meter on live streams); **Studio → 🔴 Go live**; and any **creator profile** (Ask-AI box + funding goal).
@@ -130,6 +131,10 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 - ✅ Viewer net balance rises from ads, falls from creators — live
 - ✅ Three-layer attention proof (passive signals + random tap challenge + session-bound heartbeats) prevents paying for ignored or scripted ads
 - ✅ Per-second-native features: live tip boost, second-price attention auction, pay-per-token creator AI, escrowed crowdfund goals, and live streaming with a shared audience meter
+- ✅ Advertiser escrow + refund: ad budgets are real pathUSD escrowed on-chain, spent per proven second, and the unspent remainder is refunded on-chain on Stop (verified: fund/payout/refund all settle on Tempo)
+- ✅ Every account is a real Tempo wallet; the wallet menu always shows your address, links to the Tempo explorer + app, and exports your (testnet) private key so you can take the wallet out
+- ✅ Creator dashboard: edit (title/tags) + delete your videos; live streams are shown distinctly, not as regular clips
+- ✅ Live streams are gated on creator presence — live only while the host is in the stream, auto-ending (and leaving the feed) when they go
 - ✅ Curator + Advertiser agents run autonomously with spend controls + on-chain settle
 - ✅ `/openapi.json` discovery present and valid (`mppx discover validate`)
 - ✅ Receipts / live flow feed in the UI

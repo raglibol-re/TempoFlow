@@ -8,9 +8,19 @@ import { sessionManager } from "mppx/client";
 import { createPublicClient, createWalletClient, http, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
-  TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet,
+  TEMPO_RPC_URL, TOKEN_DECIMALS, ESCROW_CONTRACT, FLOW_CURRENCY, tempoTestnet, TEMPO_EXPLORER_URL, TEMPO_APP_URL,
   type Clip, type Campaign, type Role, type Goal, type AuctionResult, type LiveStats,
 } from "@flow/shared";
+
+/** Link a real on-chain tx / address to the Tempo block explorer + the Tempo app. */
+export const explorerTxUrl = (tx: string) => `${TEMPO_EXPLORER_URL}/tx/${tx}`;
+export const explorerAddressUrl = (addr: string) => `${TEMPO_EXPLORER_URL}/address/${addr}`;
+export const tempoAppUrl = TEMPO_APP_URL;
+
+/** TESTNET ONLY: fetch the current user's own Tempo private key to take it out of the
+ *  app (import into a Tempo wallet / explorer). Returns `{ address, key }`. */
+export const exportPrivateKey = (as: string): Promise<{ address: `0x${string}`; key: `0x${string}` }> =>
+  jget(`/wallet/export?as=${encodeURIComponent(as)}`, "export wallet key");
 
 /**
  * Resolve the backend URL at RUNTIME so a single Vercel build can target any
@@ -74,8 +84,6 @@ export const fetchCampaigns = () => jget("/campaigns", "load campaigns").then((j
 export const fetchAdminUsers = () => jget("/admin/users", "load admin users").then((j) => (j.users ?? []) as AdminUser[]);
 export const fundUser = (userId: string) => jpost("/demo/fund", { userId }, "get test funds");
 export const createCampaign = (as: string, tags: string[]) => jpost("/campaigns", { as, tags }, "create campaign").then((j) => j.campaign as Campaign);
-/** Fund an ad: tops up the advertiser wallet (faucet) + raises the budget cap. */
-export const fundCampaign = (campaignId: string, amountUsd = 0.2) => jpost(`/campaigns/${campaignId}/fund`, { amountUsd }, "fund ad");
 export const resetNet = () => jpost("/reset", {}, "reset").catch(() => {});
 /** A challenge the viewer must answer to prove they're watching (Layer 2). */
 export interface AttentionChallenge { id: string; x: number; y: number; answerMs: number }
@@ -147,6 +155,18 @@ export const goLive = (as: string, title: string, tags: string[], pricePerSec?: 
 export const stopLive = (id: string, as: string) => jpost(`/live/${id}/stop`, { as }, "end live").catch(() => {});
 export const cheerLive = (id: string) => jpost(`/live/${id}/cheer`, {}, "cheer").then((j) => j.applause as number).catch(() => 0);
 export const fetchLiveStats = (id: string) => jget(`/live/${id}/stats`, "live stats") as Promise<LiveStats>;
+/** Host presence pulse — keeps the creator's own stream alive while they're in it. */
+export const liveHostBeat = (id: string, as: string) => jpost(`/live/${id}/host-beat`, { as }, "host beat").catch(() => ({ live: false }));
+/** Best-effort end-stream on tab close (survives unload where fetch won't). */
+export function endLiveBeacon(id: string, as: string) {
+  try { navigator.sendBeacon(`${SERVER_URL}/live/${id}/stop`, new Blob([JSON.stringify({ as })], { type: "application/json" })); } catch { /* ignore */ }
+}
+
+// ── Creator dashboard: edit / delete clips ───────────────────────────────────
+export const updateClipMeta = (id: string, as: string, title: string, tags: string[]) =>
+  jpost(`/clips/${id}/edit`, { as, title, tags }, "edit clip").then((j) => j.clip as Clip);
+export const deleteClip = (id: string, as: string) =>
+  jpost(`/clips/${id}/delete`, { as }, "delete clip").then((j) => j as { ok: boolean; id: string });
 
 export const videoSrc = (clipId: string) => `${SERVER_URL}/video/${clipId}`;
 
@@ -272,7 +292,12 @@ export async function connectTempoAccount(privateKey: string): Promise<DemoUser>
 export async function registerAppAccount(name: string, handle: string): Promise<DemoUser> {
   const reg = await jpost("/users", { name, handle, role: "creator" }, "create account");
   const u = reg.user;
-  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? "🪪", address: u.address, key: "" as `0x${string}` };
+  // The server generated a real Tempo wallet for this account; pull its key back so the
+  // browser can sign on-chain payments (watch, fund ads). Custodial testnet model — the
+  // key is also exportable any time from the wallet menu.
+  let key = "" as `0x${string}`;
+  try { key = (await exportPrivateKey(u.id)).key; } catch { /* key stays empty; faucet + export still available */ }
+  return { id: u.id, name: u.name, role: u.role, handle: u.handle, avatar: u.avatar ?? "🪪", address: u.address, key };
 }
 
 /** Advertiser uploads an ad (video + funded budget). */
@@ -285,6 +310,46 @@ export async function uploadAd(as: string, title: string, tags: string[], file: 
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return (await r.json()).campaign as Campaign;
   } catch (e: any) { throw new Error(`upload ad: ${e?.message ?? e}`); }
+}
+
+/** The platform escrow address — the operator wallet that holds advertisers' funded
+ *  ad budgets and pays viewers from them. Advertisers deposit pathUSD here on-chain. */
+export const fetchEscrowAddress = (): Promise<`0x${string}`> =>
+  jget("/escrow-address", "load escrow address").then((j) => j.address as `0x${string}`);
+
+/** Advertiser FUNDS an ad on-chain: transfers `amountUsd` pathUSD from the advertiser's
+ *  own wallet into the platform escrow, then records the deposit against the campaign
+ *  (raising its committed budget). Real money locked on-chain; the unspent remainder
+ *  is refundable via stopCampaign. Returns the new committed budget + the deposit tx. */
+export async function fundCampaign(
+  me: DemoUser, campaignId: string, amountUsd: number,
+): Promise<{ maxBudget: string; escrowTx?: string }> {
+  if (!(amountUsd > 0)) throw new Error("amount must be greater than 0");
+  if (!me.key) throw new Error("your wallet key isn't available to fund this ad");
+  const escrow = await fetchEscrowAddress();
+  const account = privateKeyToAccount(me.key);
+  const wallet = createWalletClient({ account, chain: tempoTestnet as any, transport: http(`${SERVER_URL}/rpc`) });
+  let txHash: string | undefined;
+  try {
+    txHash = await wallet.writeContract({
+      address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer",
+      args: [escrow, parseUnits(String(amountUsd), TOKEN_DECIMALS)], chain: tempoTestnet as any,
+    });
+  } catch (e: any) {
+    throw new Error(`escrow deposit failed: ${e?.shortMessage ?? e?.message ?? e}`);
+  }
+  const j = await jpost(`/campaigns/${campaignId}/fund`, { as: me.id, amountUsd, txHash }, "record ad funding");
+  return { maxBudget: j.maxBudget as string, escrowTx: j.escrowTx as string | undefined };
+}
+
+/** Advertiser STOPS an ad campaign: the platform refunds the unspent escrow back to
+ *  the advertiser's wallet on-chain and caps the budget at what was already spent (so
+ *  no further payouts). Returns how much was refunded + the on-chain refund tx. */
+export async function stopCampaign(
+  me: DemoUser, campaignId: string,
+): Promise<{ spentUsd: number; refundedUsd: number; refundTx?: string }> {
+  const j = await jpost(`/campaigns/${campaignId}/stop`, { as: me.id }, "stop campaign");
+  return { spentUsd: Number(j.spentUsd ?? 0), refundedUsd: Number(j.refundedUsd ?? 0), refundTx: j.refundTx as string | undefined };
 }
 
 /** Upload a clip with a real video file (multipart). */

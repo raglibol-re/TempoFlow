@@ -9,7 +9,7 @@ import { getUser } from "./users.js";
 import {
   clipsCount, clipsAll, clipById, clipInsert, clipSetPrice,
   campaignsCount, campaignsAll, campaignById, campaignInsert, campaignSetBudget,
-  clipSetVideo, campaignSetVideo,
+  clipSetVideo, campaignSetVideo, clipUpdateMeta, clipDelete,
   type CampaignRow,
 } from "./db.js";
 
@@ -95,6 +95,19 @@ export function setClipPrice(id: string, pricePerSec: string): Clip {
   clipSetPrice(id, pricePerSec);
   const { videoPath, ...pub } = clipById(id)! as any;
   return pub as Clip;
+}
+
+/** Edit a clip's title + tags (creator only — caller checks ownership). */
+export function updateClipMeta(id: string, title: string, tags: string[]): Clip {
+  if (!clipById(id)) throw new Error("unknown clip");
+  clipUpdateMeta(id, title, tags);
+  const { videoPath, ...pub } = clipById(id)! as any;
+  return pub as Clip;
+}
+
+/** Delete a clip (creator only — caller checks ownership). Returns its videoPath. */
+export function deleteClip(id: string): string | undefined {
+  return clipDelete(id);
 }
 
 /** Advertiser creates an ad (optionally with an uploaded ad video + funded budget). */

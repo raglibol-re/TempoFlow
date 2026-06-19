@@ -27,6 +27,16 @@ export const TEMPO_CHAIN_ID = Number(env("TEMPO_CHAIN_ID") ?? 42431);
 export const TEMPO_RPC_URL =
   env("TEMPO_RPC_URL") ?? "https://rpc.moderato.tempo.xyz";
 
+/** Tempo testnet block-explorer base URL (testnet "moderato"). Used to link real
+ *  on-chain receipts (tx + address). Override via TEMPO_EXPLORER_URL if it differs. */
+export const TEMPO_EXPLORER_URL =
+  env("TEMPO_EXPLORER_URL") ?? "https://explorer.moderato.tempo.xyz";
+
+/** The Tempo app / project home — linked from the wallet dashboard so users can open
+ *  Tempo directly. Override via TEMPO_APP_URL. */
+export const TEMPO_APP_URL =
+  env("TEMPO_APP_URL") ?? "https://tempo.xyz";
+
 /** TIP-20 token decimals (pathUSD + all Tempo tokens). */
 export const TOKEN_DECIMALS = 6;
 
@@ -65,6 +75,9 @@ export const tempoTestnet = {
   rpcUrls: {
     default: { http: [TEMPO_RPC_URL] },
     public: { http: [TEMPO_RPC_URL] },
+  },
+  blockExplorers: {
+    default: { name: "Tempo Explorer", url: TEMPO_EXPLORER_URL },
   },
   testnet: true,
 } as const;

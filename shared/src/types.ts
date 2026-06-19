@@ -41,6 +41,7 @@ export interface LiveStats {
   perSecUsd: number; // combined $/sec flowing to the creator from all viewers
   totalUsd: number; // total paid to the creator this live session
   applause: number; // cumulative 👏 cheers
+  ended?: boolean; // the creator left / the stream is over
 }
 
 /** A creator funding goal — supporters pledge into escrow; if the goal is reached
@@ -93,6 +94,12 @@ export interface Campaign {
   advertiserBalance?: number;
   /** True only if there is remaining budget AND the advertiser wallet can pay. */
   funded?: boolean;
+  /** Campaign was stopped by the advertiser; unspent escrow was refunded. */
+  stopped?: boolean;
+  /** On-chain tx of the advertiser's escrow deposit into the ad budget. */
+  escrowTx?: string;
+  /** On-chain tx of the refund of the unspent escrow back to the advertiser. */
+  refundTx?: string;
 }
 
 /** A revenue split entry (used for collab creators). */
