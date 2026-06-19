@@ -141,6 +141,10 @@ export function clipInsert(c: ClipRow & { createdAt?: number }) {
       c.pricePerSec, JSON.stringify(c.recipients), c.hasVideo ? 1 : 0,
       c.videoPath ?? null, c.thumb ?? null, c.createdAt ?? Date.now());
 }
+/** Update a clip's price-per-second (creators can re-price anytime). */
+export function clipSetPrice(id: string, pricePerSec: string) {
+  db.prepare("UPDATE clips SET pricePerSec=? WHERE id=?").run(pricePerSec, id);
+}
 
 // ── Campaigns (ads) ──────────────────────────────────────────────────────────
 export type CampaignRow = Campaign & { videoPath?: string };

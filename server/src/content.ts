@@ -7,7 +7,7 @@ import type { Clip, Campaign } from "@flow/shared";
 import { PRICES } from "@flow/shared";
 import { getUser } from "./users.js";
 import {
-  clipsCount, clipsAll, clipById, clipInsert,
+  clipsCount, clipsAll, clipById, clipInsert, clipSetPrice,
   campaignsCount, campaignsAll, campaignById, campaignInsert, campaignSetBudget,
   type CampaignRow,
 } from "./db.js";
@@ -53,22 +53,30 @@ export const getClip = (id: string) => clipById(id);
 export const getCampaigns = () => campaignsAll();
 export const getCampaign = (id: string) => campaignById(id);
 
-/** Creator posts a clip (optionally with an uploaded video file). */
+/** Creator posts a clip (optionally with an uploaded video file + a custom price). */
 export function addClip(input: {
-  ownerId: string; title: string; tags: string[]; durationSec?: number; hasVideo?: boolean; videoPath?: string; thumb?: string;
+  ownerId: string; title: string; tags: string[]; durationSec?: number; pricePerSec?: string; hasVideo?: boolean; videoPath?: string; thumb?: string;
 }): Clip {
   const owner = getUser(input.ownerId);
   if (!owner) throw new Error("unknown owner");
   const id = `clip-${owner.id}-${Date.now().toString(36)}`;
   const clip = {
     id, title: input.title, creator: owner.handle, ownerId: owner.id,
-    tags: input.tags, durationSec: input.durationSec ?? 60, pricePerSec: PRICES.creatorPerSecond,
+    tags: input.tags, durationSec: input.durationSec ?? 60, pricePerSec: input.pricePerSec ?? PRICES.creatorPerSecond,
     recipients: [{ recipient: owner.address, percentage: 100, label: owner.handle }],
     hasVideo: !!input.hasVideo, videoPath: input.videoPath, thumb: input.thumb ?? owner.avatar,
     createdAt: Date.now(),
   };
   clipInsert(clip);
   const { videoPath, createdAt, ...pub } = clip as any;
+  return pub as Clip;
+}
+
+/** Re-price a clip (creator only — caller checks ownership). Returns the updated clip. */
+export function setClipPrice(id: string, pricePerSec: string): Clip {
+  if (!clipById(id)) throw new Error("unknown clip");
+  clipSetPrice(id, pricePerSec);
+  const { videoPath, ...pub } = clipById(id)! as any;
   return pub as Clip;
 }
 

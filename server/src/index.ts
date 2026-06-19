@@ -28,6 +28,7 @@ import {
   getClip,
   getCampaign,
   addClip,
+  setClipPrice,
   addCampaign,
   fundCampaign,
 } from "./content.js";
@@ -320,6 +321,13 @@ app.post("/unfollow", async (c) => {
 });
 
 // ── Creator content management (video upload) ───────────────────────────────
+/** Sanitize a creator-supplied price ($/sec): finite, > 0, capped to a sane range. */
+function normalizePrice(v: unknown): string | undefined {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return String(Math.min(1, Math.max(0.0001, +n.toFixed(6))));
+}
+
 app.post("/clips", async (c) => {
   const ct = c.req.header("content-type") ?? "";
   if (ct.includes("multipart/form-data")) {
@@ -338,6 +346,7 @@ app.post("/clips", async (c) => {
       title: String(body.title ?? file?.name ?? "Untitled"),
       tags: String(body.tags ?? "").split(",").map((s) => s.trim()).filter(Boolean),
       durationSec: body.durationSec ? Number(body.durationSec) : undefined,
+      pricePerSec: normalizePrice(body.pricePerSec),
       hasVideo,
       videoPath,
     });
@@ -350,8 +359,21 @@ app.post("/clips", async (c) => {
     title: String(b.title ?? "Untitled"),
     tags: Array.isArray(b.tags) ? b.tags : String(b.tags ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
     durationSec: b.durationSec ? Number(b.durationSec) : undefined,
+    pricePerSec: normalizePrice(b.pricePerSec),
   });
   return c.json({ clip });
+});
+
+/** Re-price a clip — the OWNER can change what viewers pay per second, anytime. */
+app.post("/clips/:id/price", async (c) => {
+  const id = c.req.param("id");
+  const clip = getClip(id);
+  if (!clip) return c.json({ error: "clip not found" }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  if (String(b?.as ?? "") !== clip.ownerId) return c.json({ error: "not your clip" }, 403);
+  const price = normalizePrice(b?.pricePerSec);
+  if (!price) return c.json({ error: "bad price" }, 400);
+  return c.json({ clip: setClipPrice(id, price) });
 });
 
 // ── Serve uploaded video (HTTP range support for <video>) — clips AND ads ────
