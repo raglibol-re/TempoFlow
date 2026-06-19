@@ -150,7 +150,10 @@ export async function discoverOffers(): Promise<{ serviceInfo: any; offers: Offe
 // ── sessionManager factory ──────────────────────────────────────────────────
 export function makeManager(key: `0x${string}`, maxDeposit = "0.5") {
   const account = privateKeyToAccount(key);
-  const client = createPublicClient({ chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+  // Route chain calls through the server's /rpc proxy (server-side 429 retry +
+  // backoff). Hitting the public RPC directly is what made ad channels flaky —
+  // a throttled 429 aborted the channel open and the whole payment stream failed.
+  const client = createPublicClient({ chain: tempoTestnet as any, transport: http(`${SERVER}/rpc`) });
   const manager = sessionManager({
     account,
     client,
@@ -173,7 +176,13 @@ export async function runPaidStream(opts: {
   onFrame: (f: any) => void;
   shouldStop: () => boolean;
 }): Promise<any> {
-  const stream = await opts.manager.sse(opts.url);
+  // Opening the channel does several RPC calls; retry a few times so a transient
+  // hiccup doesn't kill the whole payment stream.
+  let stream: any;
+  for (let attempt = 0; ; attempt++) {
+    try { stream = await opts.manager.sse(opts.url); break; }
+    catch (e) { if (attempt >= 3) throw e; await sleep(1200 * (attempt + 1)); }
+  }
   let stopSent = false;
   for await (const data of stream as AsyncIterable<string>) {
     let f: any;
