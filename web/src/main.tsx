@@ -166,6 +166,181 @@ function VideoCard({ clip, owner, onOpen, onProfile }: { clip: Clip; owner?: Pub
 }
 
 // ───────────────────────── watch view (payment panel) ─────────────────────────
+// ───────────────────────── tip boost (Feature 1) ─────────────────────────
+function TipBoost({ me, clip, active, onTipped }: { me: DemoUser; clip: Clip; active: boolean; onTipped?: () => void }) {
+  const [boost, setBoost] = useState(0); // extra $/sec streamed on top of watchtime
+  const [tipped, setTipped] = useState(0);
+  const [note, setNote] = useState<string | null>(null);
+  const boostRef = useRef(0); boostRef.current = boost;
+  const send = async (amt: number) => {
+    const r = await sendTip(me.id, clip.id, amt).catch(() => null);
+    if (r?.ok) { setTipped((t) => +(t + amt).toFixed(6)); setNote(null); onTipped?.(); }
+    else { setNote("out of credit"); setBoost(0); }
+  };
+  useEffect(() => {
+    if (!active || boost <= 0) return;
+    const id = setInterval(() => { void send(boostRef.current); }, 1000);
+    return () => clearInterval(id);
+  }, [active, boost, clip.id, me.id]);
+  return (
+    <div className="tipbox">
+      <div className="tip-head">💜 Tip {clip.creator}{tipped > 0 && <span className="tip-total">+{usd(tipped)} sent</span>}</div>
+      <div className="tip-quick">
+        {[0.05, 0.25, 1].map((v) => <button key={v} className="btn btn-ghost btn-sm" onClick={() => send(v)}>+{usd(v)}</button>)}
+      </div>
+      <div className="tip-boost">
+        <span className="muted" style={{ fontSize: 12 }}>stream a boost while watching</span>
+        <div className="tip-boost-opts">
+          {[0, 0.01, 0.05, 0.1].map((v) => (
+            <button key={v} className={"chip " + (boost === v ? "chip-ok" : "")} onClick={() => setBoost(v)}>{v === 0 ? "off" : `+${usd(v)}/s`}</button>
+          ))}
+        </div>
+      </div>
+      {note && <div className="muted" style={{ fontSize: 11.5, color: "var(--out)" }}>{note}</div>}
+    </div>
+  );
+}
+
+// ───────────────────────── live meter + cheer (Feature 5) ─────────────────
+function LiveMeter({ clipId }: { clipId: string }) {
+  const [stats, setStats] = useState<LiveStats | null>(null);
+  const [applause, setApplause] = useState(0);
+  useEffect(() => {
+    let on = true;
+    const tick = () => fetchLiveStats(clipId).then((s) => { if (on) { setStats(s); setApplause((a) => Math.max(a, s.applause)); } }).catch(() => {});
+    tick(); const id = setInterval(tick, 1500); return () => { on = false; clearInterval(id); };
+  }, [clipId]);
+  const cheer = async () => { setApplause((a) => a + 1); await cheerLive(clipId); };
+  return (
+    <div className="livemeter">
+      <div className="live-row"><span className="live-badge">● LIVE</span><span><b>{stats?.viewers ?? 0}</b> watching now</span></div>
+      <div className="statline"><span className="k">combined</span><span style={{ color: "var(--in)" }}>{usd(stats?.perSecUsd ?? 0)}/sec → creator</span></div>
+      <div className="statline"><span className="k">this stream</span><span>{usd(stats?.totalUsd ?? 0)}</span></div>
+      <button className="btn btn-ghost btn-sm cheer-btn" onClick={cheer}>👏 Cheer · {applause}</button>
+    </div>
+  );
+}
+
+// ───────────────────────── attention auction (Feature 2) ─────────────────
+function AuctionPanel({ me, onStart }: { me: DemoUser; onStart: (campaignId: string, clearingUsd: number) => void }) {
+  const [res, setRes] = useState<AuctionResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => { setBusy(true); try { setRes(await runAuction(me.id)); } catch { /* keep last */ } setBusy(false); };
+  useEffect(() => { void run(); /* eslint-disable-next-line */ }, []);
+  return (
+    <div className="auction">
+      <div className="auction-head"><b>⚡ Live attention auction</b><button className="btn btn-ghost btn-sm" onClick={run} disabled={busy}>{busy ? "…" : "↻ refresh bids"}</button></div>
+      <div className="muted" style={{ fontSize: 12.5, margin: "2px 0 10px" }}>Advertisers bid for your attention. Highest bid wins the slot — but you’re paid the <b>second-highest</b> price (Vickrey), so bidding honestly is the best strategy.</div>
+      {!res ? <div className="muted">running auction…</div> : (<>
+        <div className="bidbook">
+          {res.bids.map((b) => (
+            <div key={b.campaignId} className={"bidrow" + (res.winner?.id === b.campaignId ? " win" : "") + (b.funded ? "" : " dim")}>
+              <span>{res.winner?.id === b.campaignId ? "🏆 " : ""}{b.advertiser}</span>
+              <span className="muted">{usd(b.bidUsd)}/s{b.funded ? "" : " · unfunded"}</span>
+            </div>
+          ))}
+          {!res.bids.length && <div className="muted">No campaigns yet.</div>}
+        </div>
+        {res.winner ? (
+          <div className="auction-win">
+            <div>Winner <b>{res.winner.advertiser}</b> · you earn <b style={{ color: "var(--in)" }}>{usd(res.clearingUsd)}/sec</b> <span className="muted">(clearing price)</span></div>
+            <button className="btn" onClick={() => onStart(res.winner!.id, res.clearingUsd)}>▶ Earn from the winner</button>
+          </div>
+        ) : <div className="muted">No funded bidders right now — fund an ad to seed the auction.</div>}
+      </>)}
+    </div>
+  );
+}
+
+// ───────────────────────── crowdfund goal (Feature 4) ─────────────────────
+function GoalCard({ goal, me, isMe, onChanged, onError }: { goal: Goal; me: DemoUser; isMe: boolean; onChanged: () => void; onError: (e: string) => void }) {
+  const [amt, setAmt] = useState("1");
+  const [busy, setBusy] = useState(false);
+  const pledged = goal.pledgedUsd ?? 0, target = Number(goal.targetUsd);
+  const pct = target > 0 ? Math.min(100, (pledged / target) * 100) : 0;
+  const left = Math.max(0, goal.deadline - Date.now());
+  const back = async () => {
+    setBusy(true);
+    try { const r = await pledgeGoal(goal.id, me.id, Number(amt)); if (!r.ok && r.reason === "insufficient_balance") onError("Not enough credit to pledge."); onChanged(); }
+    catch (e: any) { onError(e?.message ?? String(e)); }
+    setBusy(false);
+  };
+  return (
+    <div className="goalcard">
+      <div className="goal-head"><b>🎯 {goal.title}</b>
+        <span className={"chip " + (goal.status === "funded" ? "chip-ok" : goal.status === "expired" ? "chip-bad" : "")}>{goal.status === "active" ? "live" : goal.status}</span>
+      </div>
+      <div className="bar" style={{ marginTop: 8 }}><i style={{ width: pct + "%", background: "linear-gradient(90deg,var(--in),#7af5c9)" }} /></div>
+      <div className="statline" style={{ marginTop: 6 }}><span><b>{usd(pledged)}</b> <span className="muted">of {usd(target)}</span></span><span className="muted">{goal.backers ?? 0} backers</span></div>
+      {goal.status === "active" ? (<>
+        <div className="muted" style={{ fontSize: 12 }}>{left > 0 ? `${Math.ceil(left / 60000)} min left · auto-refunds if not reached` : "resolving…"}</div>
+        {!isMe && (
+          <div className="row" style={{ marginTop: 8, alignItems: "center" }}>
+            <span className="muted">$</span>
+            <input className="input" type="number" step="0.5" min="0" style={{ width: 90 }} value={amt} onChange={(e) => setAmt(e.target.value)} />
+            <button className="btn btn-sm" onClick={back} disabled={busy || !(Number(amt) > 0)}>{busy ? "…" : "Back this goal"}</button>
+          </div>
+        )}
+        {(goal.viewerPledgedUsd ?? 0) > 0 && <div className="muted" style={{ fontSize: 12, color: "var(--in)" }}>You’ve pledged {usd(goal.viewerPledgedUsd!)} (held in escrow)</div>}
+      </>) : goal.status === "funded" ? <div className="muted" style={{ color: "var(--in)" }}>✓ Funded — pledges released to {goal.creator}.</div>
+        : <div className="muted">Goal missed — all pledges refunded to backers.</div>}
+    </div>
+  );
+}
+function CreateGoalForm({ me, onCreated, onError }: { me: DemoUser; onCreated: () => void; onError: (e: string) => void }) {
+  const [title, setTitle] = useState(""); const [target, setTarget] = useState("10"); const [minutes, setMinutes] = useState("10");
+  const [busy, setBusy] = useState(false);
+  const create = async () => { if (!title.trim()) return; setBusy(true); try { await createGoal(me.id, title.trim(), Number(target), Number(minutes)); setTitle(""); onCreated(); } catch (e: any) { onError(e?.message ?? String(e)); } setBusy(false); };
+  return (
+    <div className="goalcard">
+      <div className="goal-head"><b>🎯 Start a funding goal</b></div>
+      <div className="row" style={{ flexDirection: "column", gap: 8, marginTop: 8 }}>
+        <input className="input" placeholder="e.g. New camera for 4K streams" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <div className="row" style={{ alignItems: "center" }}>
+          <span className="muted">$</span><input className="input" type="number" min="1" style={{ width: 90 }} value={target} onChange={(e) => setTarget(e.target.value)} />
+          <span className="muted">in</span><input className="input" type="number" min="1" style={{ width: 70 }} value={minutes} onChange={(e) => setMinutes(e.target.value)} /><span className="muted">min</span>
+          <button className="btn btn-sm" onClick={create} disabled={busy || !title.trim()}>{busy ? "…" : "Launch"}</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12 }}>Backers’ pledges are escrowed. Reach the goal → released to you; miss it → auto-refunded.</div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── ask creator's AI (Feature 3) ───────────────────
+function AskCreatorBox({ creator, me, onBalance }: { creator: PublicUser; me: DemoUser; onBalance: () => void }) {
+  const [q, setQ] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [meta, setMeta] = useState<{ tokens: number; costUsd: number; via?: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const abort = useRef<(() => void) | null>(null);
+  useEffect(() => () => abort.current?.(), []);
+  const ask = () => {
+    if (!q.trim() || streaming) return;
+    setAnswer(""); setMeta(null); setErr(null); setStreaming(true);
+    abort.current = askCreator(creator.id, me.id, q.trim(), (e: AskEvent) => {
+      if (e.type === "token") setAnswer((a) => a + (e.text ?? ""));
+      else if (e.type === "start") setMeta({ tokens: 0, costUsd: 0, via: e.via });
+      else if (e.type === "done") { setMeta({ tokens: e.tokens ?? 0, costUsd: e.costUsd ?? 0, via: undefined }); setStreaming(false); onBalance(); }
+      else if (e.type === "out-of-balance") { setErr("Out of credit — top up to keep chatting."); setStreaming(false); onBalance(); }
+      else if (e.type === "error") { setErr(e.error ?? "error"); setStreaming(false); }
+    });
+  };
+  return (
+    <div className="askbox">
+      <div className="ask-head"><b>🤖 Ask {creator.name}’s AI</b><span className="muted" style={{ fontSize: 12 }}>pay per token · revenue to {creator.name}</span></div>
+      <div className="row" style={{ marginTop: 8 }}>
+        <input className="input" placeholder={`Ask ${creator.name} anything…`} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask()} disabled={streaming} />
+        <button className="btn btn-sm" onClick={ask} disabled={streaming || !q.trim()}>{streaming ? "…" : "Ask"}</button>
+      </div>
+      {(answer || streaming) && <div className="ask-answer">{answer || "…"}{streaming && <span className="ask-caret">▋</span>}</div>}
+      {meta && !streaming && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{meta.tokens} tokens · paid {usd(meta.costUsd)} to {creator.name}</div>}
+      {err && <div className="muted" style={{ fontSize: 12, color: "var(--out)" }}>{err}</div>}
+    </div>
+  );
+}
+
 const LOW_CAP = 0.012;
 function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, onTopup }: { clip: Clip; me: DemoUser; onBack: () => void; onError: (e: string) => void; onSettled: () => void; onProfile?: (id: string) => void; balance: number | null; onTopup: () => void }) {
   const [phase, setPhase] = useState<"idle" | "opening" | "watching" | "paused" | "closing">("idle");
@@ -261,6 +436,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               ? <video ref={video} src={videoSrc(clip.id)} loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
             <button className="fs-open" onClick={openFullscreen} title="fullscreen">⛶</button>
+            {clip.live && <span className="live-badge player-live">● LIVE</span>}
             {fullscreen && (
               <div className={"fs-layer" + (fsControls ? " show" : "")}>
                 <button className="fs-back" onClick={closeFullscreen}>← Back</button>
@@ -286,6 +462,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
         {/* payment panel */}
         <div className="panel">
           <h3><span className={"livedot" + (live ? " on" : "")} /> pay-per-second → creator</h3>
+          {clip.live && <LiveMeter clipId={clip.id} />}
           <div className="bignum out">− {usd(spent)}</div>
           <div className="statline"><span className="k">rate</span><span>{usd(Number(clip.pricePerSec))}/sec</span></div>
           <div className="statline"><span className="k">watched</span><span>{secs}s</span></div>
@@ -295,6 +472,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             <div className="statline" style={{ marginTop: 5 }}><span className="k">refundable on stop</span><span style={{ color: "var(--in)" }}>{usd(Math.max(0, deposit - spent))}</span></div>
           </div>
           <MoneyFlow dir="out" active={live} />
+          <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
             {phase === "idle" || phase === "paused"
               ? <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "paused" ? "▶ Resume" : "▶ Watch"}</button>
@@ -326,7 +504,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
 /** Watch a red-framed ad video and get PAID per second of proven attention.
  *  The money is pulled automatically from the advertiser's wallet (server-spawned
  *  payer); when the ad's funded budget runs out it simply stops paying. */
-function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; onBack: () => void; onProfile?: (id: string) => void }) {
+function AdWatch({ ad, me, onBack, onProfile, rewardRate }: { ad: Campaign; me: DemoUser; onBack: () => void; onProfile?: (id: string) => void; rewardRate?: number | null }) {
   const [watching, setWatching] = useState(false); // user pressed "Watch ad" (explicit start)
   const [attention, setAttention] = useState(true); // manual "look away" toggle
   const [visible, setVisible] = useState(true); // tab foregrounded (Layer 1)
@@ -410,7 +588,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   useEffect(() => {
     if (!watching) return; // nothing runs until the viewer presses Watch
     let alive = true;
-    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
+    openAttentionSession(ad.id, me.id, rewardRate ?? undefined).then((t) => { if (alive) token.current = t; });
     const beat = async () => {
       const v = video.current;
       const playing = !!v && !v.paused && !v.ended && v.readyState >= 2;
@@ -447,7 +625,9 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
     return () => clearInterval(id);
   }, [me.id, watching]);
 
-  const price = Number(ad.pricePerSec);
+  // What the viewer EARNS per second: the auction clearing price if they arrived via
+  // the auction, otherwise the campaign's own rate.
+  const price = rewardRate ?? Number(ad.pricePerSec);
   const budget = Number(ad.maxBudget);
   const spent = ad.spentUsd ?? 0;
   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
@@ -530,6 +710,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
 
         <div className="panel">
           <h3><span className={"livedot in" + (paying ? " on" : "")} /> earning — paid by advertiser</h3>
+          {rewardRate != null && <div className="auction-banner">🏆 Auction win · clearing price <b>{usd(rewardRate)}/sec</b> (2nd-price)</div>}
           <div className="bignum in">+ {usd(earned)}</div>
           <div className="statline"><span className="k">rate</span><span>{usd(price)}/sec</span></div>
           <div>

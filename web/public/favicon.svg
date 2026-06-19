@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="tf-g" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9147ff"/>
+      <stop offset="1" stop-color="#4aa3ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#tf-g)"/>
+  <!-- play head: a stream pushing forward -->
+  <path d="M12 8.2 L23 15.2 a0.95 0.95 0 0 1 0 1.6 L12 23.8 Z" fill="#fff"/>
+  <!-- flow wave: money streaming per second -->
+  <path d="M5 26.4 q3.2 -3.4 6.4 0 t6.4 0 t6.4 0" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" opacity="0.9"/>
+</svg>
