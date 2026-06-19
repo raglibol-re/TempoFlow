@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import type { Clip, Campaign } from "@flow/shared";
 import {
   fetchUsers, fetchFeed, fetchCampaigns, fetchNet, fetchBalance,
-  fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, watchClip,
+  fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -18,8 +18,11 @@ import {
 } from "./flow";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
-const fmtBal = (n: number) => "$" + compact.format(n);
-const usd = (n: number) => "$" + n.toFixed(3);
+// pathUSD — the Tempo testnet stablecoin (6 decimals); ◎ is its symbol. Balance,
+// money-in and money-out are ALL pathUSD, formatted identically by `usd`/`fmtBal`.
+const nf = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(n) < 1 ? 4 : 2 });
+const usd = (n: number) => "◎" + nf(n);
+const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
 
@@ -337,7 +340,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
   // anyway so the ad isn't blocked forever.
   useEffect(() => {
     if (!watching || !funded || !attention || started) return;
-    const t = setTimeout(() => setStarted(true), 9000);
+    const t = setTimeout(() => setStarted(true), 15000); // backstop only — opening an on-chain channel can take ~8-15s on the public RPC
     return () => clearTimeout(t);
   }, [watching, funded, attention, started]);
 
@@ -362,7 +365,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
               : !onScreen
               ? <div className="ov">⬆️ scroll the ad back into view to keep earning</div>
               : !started
-              ? <div className="ov">⏳ opening payment channel on Tempo… the ad starts when the money does (~3–6s)</div>
+              ? <div className="ov">⏳ opening a Tempo payment channel… the ad starts the moment the money flows (~5–15s, one time)</div>
               : null}
             {/* Layer 2: random attention challenge — tap it within a few seconds. */}
             {challenge && funded && started && (
@@ -410,7 +413,7 @@ function AdWatch({ ad, me, onBack, onProfile }: { ad: Campaign; me: DemoUser; on
                   <button className="btn btn-ghost" onClick={onBack}>Stop</button>
                 </>}
           </div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{!watching ? "press ▶ Watch ad to start earning" : !funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !visible ? "🛑 background tab — paused, come back to keep earning" : !onScreen ? "⬆️ ad scrolled off-screen — paused" : challenge ? "👀 tap the prompt to prove you’re watching" : !started ? "⏳ opening payment channel — the ad starts once you’re being paid" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{!watching ? "press ▶ Watch ad to start earning" : !funded ? "⛔ unfunded — ask the advertiser to fund it" : !attention ? "🙈 paused — look back to keep earning" : !visible ? "🛑 background tab — paused, come back to keep earning" : !onScreen ? "⬆️ ad scrolled off-screen — paused" : challenge ? "👀 tap the prompt to prove you’re watching" : !started ? "⏳ opening a Tempo payment channel — the ad starts once the money flows" : paying ? "👀 attention proven — being paid" : "👀 attention proven"}</div>
         </div>
       </div>
     </div>
@@ -549,7 +552,7 @@ function ProfileView({ id, me, onBack, onOpenProfile, onWatch, onError, onMeUpda
             <button className={"pstat" + (tab === "supporters" ? " on" : "")} onClick={() => setTab("supporters")}><b>{compact.format(p.followerCount)}</b> supporters</button>
             <button className={"pstat" + (tab === "following" ? " on" : "")} onClick={() => setTab("following")}><b>{compact.format(p.followingCount)}</b> following</button>
             <span className="pstat"><b style={{ color: "var(--in)" }}>{usd(p.followEarnings)}</b> from fans</span>
-            <span className="pill"><span className="coin">◎</span> {fmtBal(p.balance)}</span>
+            <span className="pill" title="pathUSD balance on Tempo">{fmtBal(p.balance)} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
           </div>
         </div>
         <div className="phead-cta">
@@ -643,6 +646,8 @@ function App() {
   const [adCampaign, setAdCampaign] = useState<string | null>(null);
   // studio (creator upload)
   const [title, setTitle] = useState(""); const [tags, setTags] = useState(""); const [file, setFile] = useState<File | null>(null); const [uploading, setUploading] = useState(false);
+  const [price, setPrice] = useState("0.002"); // creator-set price ($/sec) for new uploads
+  const [priceEdits, setPriceEdits] = useState<Record<string, string>>({}); const [savingPrice, setSavingPrice] = useState<string | null>(null);
   // ad studio (advertiser upload)
   const [adTitle, setAdTitle] = useState(""); const [adTags, setAdTags] = useState(""); const [adFile, setAdFile] = useState<File | null>(null); const [adBudget, setAdBudget] = useState("0.20"); const [publishingAd, setPublishingAd] = useState(false); const [fundingAd, setFundingAd] = useState<string | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -683,8 +688,13 @@ function App() {
   async function getFunds() { if (!me) return; setFunding(true); try { await fundUser(me.id); setBalance(await fetchBalance(me.id)); } catch (e: any) { setError(e?.message); } setFunding(false); }
   async function submitUpload() {
     if (!me || !file || !title.trim()) return; setUploading(true);
-    try { await uploadClip(me.id, title.trim(), tags.split(",").map((t) => t.trim()).filter(Boolean), file, 60); setTitle(""); setTags(""); setFile(null); refreshFeed(); }
+    try { await uploadClip(me.id, title.trim(), tags.split(",").map((t) => t.trim()).filter(Boolean), file, 60, price); setTitle(""); setTags(""); setFile(null); refreshFeed(); }
     catch (e: any) { setError(e?.message ?? String(e)); } setUploading(false);
+  }
+  async function savePrice(id: string) {
+    if (!me) return; const v = priceEdits[id]; if (v == null) return; setSavingPrice(id);
+    try { const updated = await setClipPrice(id, me.id, v); setFeed((fd) => fd.map((c) => (c.id === id ? updated : c))); setPriceEdits((p) => { const nx = { ...p }; delete nx[id]; return nx; }); }
+    catch (e: any) { setError(e?.message ?? String(e)); } setSavingPrice(null);
   }
 
   if (!me) return users.length ? <><Login users={users} onLogin={login} onError={setError} />{error && <div className="login"><div className="toast-err">{error}<button className="btn-ghost btn btn-sm" onClick={() => setError(null)}>×</button></div></div>}</> : <div className="login"><div className="muted" style={{ padding: 40, textAlign: "center" }}>{error ?? "loading TempoFlow…"}</div></div>;
@@ -708,7 +718,7 @@ function App() {
         <div className="brand"><span className="dot" />Tempo<b>Flow</b></div>
         <div className="nav-links">{nav.map(([v, l]) => <button key={v} className={"nav-link" + (view === v ? " active" : "")} onClick={() => go(v)}>{l}</button>)}</div>
         <div className="nav-right">
-          <span className="pill"><span className="coin">◎</span> {balance != null ? fmtBal(balance) : "…"}</span>
+          <span className="pill" title="your pathUSD balance on Tempo">{balance != null ? fmtBal(balance) : "◎…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
           <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <button className="btn btn-faucet btn-sm" onClick={getFunds} disabled={funding}>{funding ? "funding…" : "🚰 Test funds"}</button>
           <AccountMenu me={me} balance={balance} onProfile={() => openProfile(me.id)} onLogout={logout} />
@@ -738,12 +748,42 @@ function App() {
                   <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
                   <input className="input" placeholder="tags (comma separated)" value={tags} onChange={(e) => setTags(e.target.value)} />
                   <input className="input" type="file" accept="video/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                  <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                    <span className="muted" style={{ fontSize: 13 }}>Your price</span>
+                    <span className="muted">$</span>
+                    <input className="input" type="number" step="0.001" min="0" value={price} onChange={(e) => setPrice(e.target.value)} style={{ width: 110 }} title="price per second" />
+                    <span className="muted" style={{ fontSize: 13 }}>/ second</span>
+                  </div>
                   <button className="btn" onClick={submitUpload} disabled={!file || !title.trim() || uploading}>{uploading ? "uploading…" : "⬆ Publish"}</button>
-                  <div className="muted" style={{ fontSize: 12 }}>Stored locally (SQLite + file). Viewers pay you {usd(0.002)}/sec to your wallet.</div>
+                  <div className="muted" style={{ fontSize: 12 }}>You set the price — viewers pay <b>{usd(Number(price) || 0)}/sec</b> straight to your wallet while they watch. You can change it anytime below.</div>
                 </div>
               </div>
               <div className="section-title">Your channel ({myClips.length}) · <span className="chan-link" onClick={() => openProfile(me.id)}>view your profile →</span></div>
-              {myClips.length ? <div className="grid">{myClips.map((c) => <VideoCard key={c.id} clip={c} owner={me} onProfile={openProfile} onOpen={() => { setCurrent(c); setView("watch"); }} />)}</div> : <div className="muted">No clips yet — upload one above.</div>}
+              {myClips.length ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {myClips.map((c) => {
+                    const edited = priceEdits[c.id] ?? c.pricePerSec;
+                    return (
+                      <div key={c.id} className="adrow" style={{ borderLeftColor: "var(--accent)" }}>
+                        <div className="adrow-thumb" style={{ cursor: "pointer" }} onClick={() => { setCurrent(c); setView("watch"); }}>
+                          {c.hasVideo ? <video src={videoSrc(c.id) + "#t=0.1"} muted playsInline /> : <span style={{ fontSize: 30 }}>{c.thumb ?? "🎬"}</span>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700 }}>{c.title}</div>
+                          <div className="muted" style={{ fontSize: 12 }}>{c.tags.join(", ") || "untagged"} · {c.durationSec}s</div>
+                          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>viewers pay <b style={{ color: "var(--out)" }}>{usd(Number(c.pricePerSec))}/sec</b> · ≈ {usd(Number(c.pricePerSec) * c.durationSec)} for the full clip</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <span className="muted" style={{ fontSize: 12 }}>$</span>
+                          <input className="input" type="number" step="0.001" min="0" style={{ width: 88 }} value={edited} onChange={(e) => setPriceEdits((p) => ({ ...p, [c.id]: e.target.value }))} />
+                          <span className="muted" style={{ fontSize: 12 }}>/sec</span>
+                          <button className="btn btn-sm" onClick={() => savePrice(c.id)} disabled={savingPrice === c.id || edited === c.pricePerSec || !(Number(edited) > 0)}>{savingPrice === c.id ? "…" : "Save price"}</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div className="muted">No clips yet — upload one above.</div>}
             </>)}
 
             {view === "earn" && (<>

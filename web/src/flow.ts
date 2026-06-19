@@ -221,9 +221,10 @@ export async function uploadAd(as: string, title: string, tags: string[], file: 
 }
 
 /** Upload a clip with a real video file (multipart). */
-export async function uploadClip(as: string, title: string, tags: string[], file: File, durationSec: number): Promise<Clip> {
+export async function uploadClip(as: string, title: string, tags: string[], file: File, durationSec: number, pricePerSec?: string): Promise<Clip> {
   const fd = new FormData();
   fd.append("as", as); fd.append("title", title); fd.append("tags", tags.join(",")); fd.append("durationSec", String(durationSec));
+  if (pricePerSec) fd.append("pricePerSec", pricePerSec);
   fd.append("video", file);
   try {
     const r = await fetch(`${SERVER_URL}/clips`, { method: "POST", body: fd });
@@ -231,6 +232,10 @@ export async function uploadClip(as: string, title: string, tags: string[], file
     return (await r.json()).clip as Clip;
   } catch (e: any) { throw new Error(`upload clip: ${e?.message ?? e}`); }
 }
+
+/** Re-price one of your clips (creator only) — viewers pay this $/sec. Returns the updated clip. */
+export const setClipPrice = (clipId: string, as: string, pricePerSec: string) =>
+  jpost(`/clips/${clipId}/price`, { as, pricePerSec }, "update price").then((j) => j.clip as Clip);
 
 export interface Tick { second: number; spentUsd: number; creator: string; clipId: string }
 /** Result of settling (closing) a payment channel — straight from the on-chain
