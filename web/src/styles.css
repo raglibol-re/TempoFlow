@@ -313,6 +313,28 @@ textarea.input { resize: vertical; font-family: inherit; }
 .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
 .addr-pill:hover { border-color: var(--accent2); color: #fff; }
 @media (max-width: 760px) { .addr-pill { display: none; } }
+
+/* ---- Social: likes + comments ---- */
+.social { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.social-actions { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.like-btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); border-radius: 999px; padding: 7px 15px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all .12s; }
+.like-btn:hover { border-color: var(--out); }
+.like-btn.on { color: var(--out); border-color: var(--out); background: rgba(255,93,115,.12); }
+.like-btn:disabled { opacity: .6; cursor: default; }
+.comment-input { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.comment-input .input { flex: 1; }
+.comment-list { display: flex; flex-direction: column; gap: 12px; }
+.comment { display: flex; gap: 10px; }
+.comment .a { width: 30px; height: 30px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+/* ---- Live chat ---- */
+.livechat { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+.livechat-head { padding: 8px 12px; font-weight: 800; font-size: 13px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.livechat-list { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; max-height: 280px; min-height: 120px; overflow-y: auto; }
+.chat-msg { font-size: 13px; line-height: 1.4; word-break: break-word; }
+.chat-user { font-weight: 700; color: var(--accent2); }
+.livechat-input { display: flex; gap: 6px; padding: 9px 10px; border-top: 1px solid var(--border); }
+.livechat-input .input { flex: 1; }
 .linkbtn { border: none; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; }
 .linkbtn:hover { color: #fff; }
 
