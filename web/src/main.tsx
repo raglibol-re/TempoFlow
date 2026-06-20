@@ -908,7 +908,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
   const [agentAd, setAgentAd] = useState<Campaign | null>(null); // the ad the agent matched (for the out-of-funds takeover)
   const [summary, setSummary] = useState<CloseSummary | null>(null);
-  const [low, setLow] = useState(true); // refill demo loop ON by default so the agent is always visibly working
+  const [low, setLow] = useState(false); // default OFF: real funds run out on their own (small trial credit) → real agent refill. Tick only to simulate running low instantly.
   const [fullscreen, setFullscreen] = useState(false);
   const [fsControls, setFsControls] = useState(true);
   const handle = useRef<WatchHandle | null>(null);
@@ -1153,7 +1153,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               ? <button className="btn btn-ghost" onClick={() => void stopWatch()} style={{ flex: 1 }}>{phase === "opening" ? "opening…" : "■ Stop watching"}</button>
               : <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "stopped" ? "▶ Watch again" : "▶ Watch"}</button>}
           </div>
-          <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Auto-refill demo — agent plays a matching ad when your credit runs low (uncheck to just watch)</label>
+          <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Speed up demo — simulate running low instantly (off: your real trial credit runs out on its own, then the agent refills you)</label>
           {summary && (() => {
             const paid = summary.spentUsd ?? spent;
             return (
