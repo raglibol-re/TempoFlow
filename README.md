@@ -3,8 +3,6 @@
 </p>
 
 
-
-
 <h1 align="center">TempoFlow</h1>
 
 <p align="center">
