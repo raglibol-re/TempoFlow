@@ -440,6 +440,18 @@ textarea.input { resize: vertical; font-family: inherit; }
 a.tx { color: var(--accent2); font-size: 12px; text-decoration: none; cursor: pointer; }
 a.tx:hover { text-decoration: underline; }
 
+/* ---- Live payment stream visual ---- */
+.paystream { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--surface2); }
+.paystream-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.paystream-label { font-size: 12.5px; font-weight: 700; }
+.paystream-label.out { color: var(--out); }
+.paystream-label.in { color: var(--in); }
+.paystream-num { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 800; }
+.paystream-num.pulsing { animation: paypulse 1.1s ease-in-out infinite; }
+@keyframes paypulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+.paystream-net { text-align: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.paystream-net-num { font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+
 .linkbtn { border: none; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; }
 .linkbtn:hover { color: #fff; }
 

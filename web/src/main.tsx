@@ -1016,21 +1016,27 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
         {/* payment + autonomous ad-agent sidebar */}
         <div className="watch-side">
         <div className="panel">
-          <h3><span className={"livedot" + (live ? " on" : "")} /> pay-per-second → creator</h3>
+          <h3><span className={"livedot" + (live ? " on" : "")} /> live payment stream</h3>
           {clip.live && <LiveMeter clipId={clip.id} onEnded={() => { setStreamEnded(true); if (handle.current) void closeOut("ended"); }} />}
-          <div className="bignum out">− {usd(spent)}</div>
-          <div className="statline"><span className="k">rate</span><span>{usd(Number(clip.pricePerSec))}/sec</span></div>
-          <div className="statline"><span className="k">watched</span><span>{secs}s</span></div>
-          {!clip.live && <>
-            <div className="statline"><span className="k">earned back by agent</span><span style={{ color: "var(--in)" }}>+ {usd(earned)}</span></div>
-            <div className="statline"><span className="k">net this session</span><span><b style={{ color: earned - spent >= 0 ? "var(--in)" : "var(--out)" }}>{earned - spent >= 0 ? "+" : "−"} {usd(Math.abs(earned - spent))}</b>{Math.abs(earned - spent) < 0.012 ? " · ≈ free" : ""}</span></div>
-          </>}
-          <div>
-            <div className="statline" style={{ marginBottom: 5 }}><span className="k">channel deposit</span><span>{usd(spent)} / {usd(deposit)}</span></div>
-            <div className="bar"><i style={{ width: pct + "%" }} /></div>
-            <div className="statline" style={{ marginTop: 5 }}><span className="k">refundable on stop</span><span style={{ color: "var(--in)" }}>{usd(Math.max(0, deposit - spent))}</span></div>
+          <div className="paystream">
+            <div className="paystream-row">
+              <span className="paystream-label out">▼ to creator <span className="muted">{usd(Number(clip.pricePerSec))}/s</span></span>
+              <span className={"bignum out paystream-num" + (live ? " pulsing" : "")}>− {usd(spent)}</span>
+            </div>
+            <MoneyFlow dir="out" active={live} />
+            {!clip.live && <>
+              <div className="paystream-row" style={{ marginTop: 10 }}>
+                <span className="paystream-label in">▲ from ads · agent</span>
+                <span className={"bignum in paystream-num" + (live && earned > 0 ? " pulsing" : "")}>+ {usd(earned)}</span>
+              </div>
+              <MoneyFlow dir="in" active={live && earned > 0} />
+              <div className="paystream-net">
+                <span className="muted" style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px" }}>net balance</span>
+                <div className="paystream-net-num" style={{ color: earned - spent >= 0 ? "var(--in)" : "var(--out)" }}>{earned - spent >= 0 ? "+" : "−"} {usd(Math.abs(earned - spent))}</div>
+                <span className="muted" style={{ fontSize: 12 }}>{Math.abs(earned - spent) < 0.012 ? "watching costs ≈ €0 — ads pay it back" : `watched ${secs}s`}</span>
+              </div>
+            </>}
           </div>
-          <MoneyFlow dir="out" active={live} />
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
             {phase === "idle" || phase === "paused"
