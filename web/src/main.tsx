@@ -1007,23 +1007,6 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video to play — you pay ${usd(price)}/sec to the creator`}</div>}
             {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
             {!streamEnded && phase === "stopped" && <div className="ov">■ Stopped — click the video to watch again.</div>}
-            {!streamEnded && outOfFunds && (
-              <div className="ov ov-ad-takeover" onClick={(e) => e.stopPropagation()}>
-                {agentAd?.hasVideo
-                  ? <video src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="takeover-ad" />
-                  : <span className="emoji" style={{ fontSize: 64 }}>{agentAd?.thumb ?? "📣"}</span>}
-                <span className="adtag" style={{ top: 10, left: 10 }}>● AD · agent</span>
-                <div className="takeover-copy">
-                  <div style={{ fontSize: 17, fontWeight: 800 }}>⛔ Out of funds — your agent took over</div>
-                  <div className="muted" style={{ fontSize: 13, maxWidth: 380, margin: "6px auto 0" }}>It’s playing a matching ad to earn it back — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. The video resumes automatically the moment you’re back in credit.</div>
-                  <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
-                    {demoOut && <button className="btn btn-sm" onClick={() => setCapDisabled(true)}>▶ Keep watching</button>}
-                    <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
           <PopularityTimeline
             videoDuration={videoDuration || clip.durationSec}
@@ -1085,6 +1068,27 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
         {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={outOfFunds} outOfFunds={outOfFunds} />}
         </div>
       </div>
+
+      {/* OUT-OF-FUNDS: full-window ad takeover with a red frame (the agent steps in) */}
+      {!streamEnded && outOfFunds && (
+        <div className="adpop-backdrop">
+          <div className="adpop">
+            {agentAd?.hasVideo
+              ? <video src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="adpop-video" />
+              : <div className="adpop-emoji">{agentAd?.thumb ?? "📣"}</div>}
+            <span className="adpop-tag">● AD · your agent</span>
+            <div className="adpop-copy">
+              <div className="adpop-title">⛔ Out of funds — your agent took over</div>
+              <div className="adpop-sub">Playing a matching ad to refill you — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Watching resumes automatically the moment you’re back in credit.</div>
+              <div className="adpop-actions">
+                {demoOut && <button className="btn btn-sm" onClick={() => setCapDisabled(true)}>▶ Keep watching</button>}
+                <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <defs>
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="dots" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f59e42"/>
+      <stop offset="0.5" stop-color="#eab308"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <!-- backdrop -->
+  <rect x="0" y="0" width="900" height="400" fill="#0a0e16"/>
+  <rect x="0" y="0" width="900" height="4" fill="url(#top)"/>
+
+  <!-- title -->
+  <text x="450" y="50" text-anchor="middle" fill="#eef2f6" font-size="30" font-weight="700">TempoFlow</text>
+  <text x="450" y="78" text-anchor="middle" fill="#8a94a3" font-size="14">your attention to ads pays for your creator feed</text>
+
+  <!-- OUT card -->
+  <rect x="40" y="150" width="250" height="165" rx="14" fill="#131922" stroke="#232c39"/>
+  <text x="165" y="192" text-anchor="middle" fill="#f59e42" font-size="15" font-weight="700">OUT → creators</text>
+  <text x="165" y="240" text-anchor="middle" fill="#f59e42" font-size="38" font-weight="700">$0.0168</text>
+  <text x="165" y="278" text-anchor="middle" fill="#f59e42" fill-opacity="0.85" font-size="15" font-weight="600">−$0.0028/s</text>
+
+  <!-- NET (center) -->
+  <text x="450" y="168" text-anchor="middle" fill="#8a94a3" font-size="16" font-weight="700">NET</text>
+  <text x="450" y="232" text-anchor="middle" fill="#eef2f6" font-size="54" font-weight="800">+$0.0000</text>
+  <text x="450" y="266" text-anchor="middle" fill="#8a94a3" font-size="14">≈ $0.00&#160;&#160;·&#160;&#160;watched, cost nothing</text>
+
+  <!-- IN card -->
+  <rect x="610" y="150" width="250" height="165" rx="14" fill="#131922" stroke="#232c39"/>
+  <text x="735" y="192" text-anchor="middle" fill="#34d399" font-size="15" font-weight="700">IN ← ads</text>
+  <text x="735" y="240" text-anchor="middle" fill="#34d399" font-size="38" font-weight="700">$0.0168</text>
+  <text x="735" y="278" text-anchor="middle" fill="#34d399" fill-opacity="0.85" font-size="15" font-weight="600">+$0.0028/s</text>
+
+  <!-- flow dots -->
+  <g>
+    <circle cx="200" cy="330" r="4" fill="#f59e42"/>
+    <circle cx="255" cy="338" r="4" fill="#ef9a3c"/>
+    <circle cx="310" cy="332" r="5" fill="#e0a93e"/>
+    <circle cx="365" cy="340" r="4" fill="#cdb340"/>
+    <circle cx="420" cy="333" r="5" fill="#a8c24a"/>
+    <circle cx="478" cy="340" r="5" fill="#86cf66"/>
+    <circle cx="535" cy="333" r="4" fill="#67d089"/>
+    <circle cx="590" cy="339" r="4" fill="#4dd39f"/>
+    <circle cx="648" cy="332" r="5" fill="#3dd2ab"/>
+    <circle cx="705" cy="338" r="4" fill="#34d399"/>
+  </g>
+
+  <!-- agent pill -->
+  <rect x="312" y="356" width="276" height="34" rx="17" fill="#1a2230" stroke="#2a3543"/>
+  <circle cx="352" cy="373" r="5" fill="#8b7cf6"/>
+  <text x="368" y="378" fill="#cfd6df" font-size="15" font-weight="700">agent balancing your feed</text>
+</svg>
