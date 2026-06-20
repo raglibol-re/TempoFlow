@@ -31,6 +31,7 @@ const usd = (n: number) => "$" + nf(n);
 const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
+type ViewName = "home" | "earn" | "flow" | "studio" | "campaigns" | "ledger" | "profile" | "watch";
 
 // Theme: dark by default. Applied to <html data-theme> before React renders (no flash).
 type Theme = "dark" | "light";
@@ -809,6 +810,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const player = useRef<HTMLDivElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const capping = useRef(false);
+  const startToken = useRef(0);
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deposit = low ? LOW_CAP : 0.5;
   const collab = clip.recipients.length > 1;
@@ -858,29 +860,46 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
 
   async function start() {
     if (phase === "opening" || phase === "watching" || handle.current) return; // guard: never open two channels
+    const token = ++startToken.current;
     setSummary(null); setSpent(0); setSecs(0); setReason(null); capping.current = false; setPhase("opening");
     // Play INSTANTLY — don't make the viewer wait for the on-chain channel to open. The
     // video starts now; the payment stream connects in the background and charging
     // begins as soon as it's ready. Try unmuting (autoplay starts it muted).
     if (video.current) { video.current.muted = false; video.current.play().catch(() => { if (video.current) { video.current.muted = true; video.current.play().catch(() => {}); } }); }
     try {
-      handle.current = await watchClip(clip, me,
+      const nextHandle = await watchClip(clip, me,
         (t: Tick) => {
+          if (token !== startToken.current) return;
           setPhase("watching"); setSpent(t.spentUsd); setSecs(t.second); video.current?.play().catch(() => {});
           setPopularity((prev) => incrementPopularity(prev, t.second - 1));
           if (low && t.spentUsd >= LOW_CAP && !capping.current) { capping.current = true; closeOut("out-of-funds"); }
         },
-        (r) => { if (!capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
-    } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); }
+        (r) => { if (token === startToken.current && !capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
+      if (token !== startToken.current) {
+        await nextHandle.stop().catch(() => {});
+        return;
+      }
+      handle.current = nextHandle;
+    } catch (e: any) {
+      if (token === startToken.current) { onError(e?.message ?? String(e)); setPhase("idle"); }
+    }
   }
   async function closeOut(why: "ended" | "out-of-funds") {
+    startToken.current++;
     if (!handle.current) return;
     setReason(why); video.current?.pause(); setPhase("closing");
     try { setSummary((await handle.current.stop()) ?? null); } catch (e: any) { onError(e?.message ?? String(e)); }
     handle.current = null; setPhase("paused"); onSettled();
   }
   function togglePlayback() {
-    if (phase === "opening" || phase === "closing") return;
+    if (phase === "closing") return;
+    if (phase === "opening") {
+      startToken.current++;
+      video.current?.pause();
+      setPhase("idle");
+      setReason(null);
+      return;
+    }
     if (phase === "watching") { void closeOut("ended"); return; }
     void start();
   }
@@ -1883,6 +1902,10 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
     setSettlement({ paid: out, earned: inUsd, refund, txHash });
     setPhase("done");
   }
+  function toggleFlowPlayback() {
+    if (phase === "idle" || phase === "done") { void start(); return; }
+    if (phase === "starting" || phase === "running") void stop();
+  }
 
   return (
     <div className="page">
@@ -1904,7 +1927,11 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
       <div className="flow-stage">
         {/* creator video — money OUT */}
         <div className="flow-pane">
-          <div className="player">
+          <div
+            className="player click-player"
+            onClick={toggleFlowPlayback}
+            title={phase === "idle" || phase === "done" ? "click to start" : phase === "settling" ? "settling" : "click to stop"}
+          >
             {clip.hasVideo ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline muted={false} /> : <span className="emoji">{clip.thumb ?? "🎬"}</span>}
             <span className="badge" style={{ background: "var(--out)" }}>↘ paying creator</span>
           </div>
@@ -1990,7 +2017,7 @@ function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [net, setNet] = useState<NetSnapshot | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
-  const [view, setView] = useState("home");
+  const [view, setView] = useState<ViewName>("home");
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const toggleTheme = () => setTheme((t) => { const next: Theme = t === "dark" ? "light" : "dark"; applyTheme(next); return next; });
   const [current, setCurrent] = useState<Clip | null>(null);
@@ -2144,13 +2171,15 @@ function App() {
   const myAds = campaigns.filter((c) => c.ownerId === me.id);
   const activeAd = adCampaign ? campaigns.find((c) => c.id === adCampaign) ?? null : null;
   // Every logged-in wallet is full-access: watch, create + upload, advertise, earn.
-  const nav: [string, string][] = [
-    ["home", "Watch"],
-    ["studio", "Creator Studio"],
-    ["campaigns", "Advertise"],
+  const nav: [ViewName, string][] = [
+    ["home", "Home"],
+    ["earn", "Ads"],
+    ["flow", "Flow"],
+    ["studio", "Studio"],
+    ["campaigns", "Ad Studio"],
     ["ledger", "Ledger"],
   ];
-  const go = (v: string) => { setView(v); setCurrent(null); setSearch(""); };
+  const go = (v: ViewName) => { setView(v); setCurrent(null); setSearch(""); };
   const userById = (uid: string) => users.find((u) => u.id === uid);
 
   return (
