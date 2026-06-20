@@ -2509,7 +2509,12 @@ function App() {
                   <div className="muted" style={{ fontSize: 12 }}>Publishing escrows that amount of <b>pathUSD</b> from your wallet on-chain into the platform vault. It pays viewers per second of proven attention; whatever isn’t spent is refunded to you when you stop the campaign.</div>
                 </div>
               </div>
-              <div className="section-title">Your ads ({myAds.length})</div>
+              <div className="section-title">Your ads ({myAds.length}) <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· as @{me.handle}</span></div>
+              {myAds.length === 0 && campaigns.length > 0 && (
+                <div className="receipt" style={{ marginBottom: 10 }}>
+                  No ads under <b>@{me.handle}</b>, but {campaigns.length} ad{campaigns.length > 1 ? "s" : ""} exist on the server — owned by: <b>{[...new Set(campaigns.map((c) => c.ownerId))].join(", ")}</b>. If your ad is under a different account, switch to it in the top-right menu.
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {myAds.map((c) => {
                   const spent = c.spentUsd ?? 0, budget = Number(c.maxBudget), left = Math.max(0, budget - spent);
