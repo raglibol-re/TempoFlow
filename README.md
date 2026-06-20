@@ -8,6 +8,7 @@ engagement-bait algorithm, no ignored-impression ads. Built on **Tempo** via the
 
 > _Your attention to ads pays for your creator feed._
 
+![money flow demo](docs/assets/flow.gif)
 
 **Status:** Phases 1–6 demo-ready on Tempo testnet — both money directions live over MPP
 payment channels, attention-gated ads, scrollable feed with collab splits, validated
