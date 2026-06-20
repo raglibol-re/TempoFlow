@@ -382,6 +382,9 @@ function LiveMeter({ clipId, onEnded }: { clipId: string; onEnded?: () => void }
  *  it away if the host vanishes). Distinct from watching a regular video. */
 function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser; onBack: () => void; onEnded: () => void }) {
   const [ending, setEnding] = useState(false);
+  const cam = useRef<HTMLVideoElement | null>(null);
+  const [camState, setCamState] = useState<"starting" | "on" | "error">("starting");
+  const [camMsg, setCamMsg] = useState("");
   useEffect(() => {
     let on = true;
     const beat = () => { if (on) void liveHostBeat(clip.id, me.id); };
@@ -392,6 +395,27 @@ function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser;
     // host leaves, heartbeats stop and the server sweep ends the stream within ~15s.
     return () => { on = false; clearInterval(id); window.removeEventListener("beforeunload", onUnload); };
   }, [clip.id, me.id]);
+  // Open the host's webcam and show it in the player (this is what they're broadcasting).
+  useEffect(() => {
+    let stream: MediaStream | null = null; let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        if (cam.current) { cam.current.srcObject = stream; await cam.current.play().catch(() => {}); }
+        setCamState("on");
+      } catch (e: any) {
+        if (cancelled) return;
+        setCamState("error");
+        setCamMsg(e?.name === "NotAllowedError" || e?.name === "SecurityError"
+          ? "Camera blocked — allow camera access in your browser, then reopen the stream."
+          : e?.name === "NotFoundError" ? "No camera found on this device."
+          : "Couldn’t open the camera on this device/browser.");
+      }
+    })();
+    return () => { cancelled = true; if (stream) stream.getTracks().forEach((t) => t.stop()); };
+  }, []);
   async function end(then: () => void) { setEnding(true); await stopLive(clip.id, me.id); then(); }
   return (
     <div className="page">
@@ -399,7 +423,9 @@ function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser;
       <div className="watch">
         <div>
           <div className="player">
-            {clip.hasVideo ? <video src={videoSrc(clip.id)} autoPlay loop muted playsInline /> : <span className="emoji">🔴</span>}
+            <video ref={cam} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }} />
+            {camState === "starting" && <span className="player-connecting">📷 starting your camera…</span>}
+            {camState === "error" && <div className="ov">📷 {camMsg}</div>}
             <span className="live-badge player-live">● LIVE</span>
           </div>
           <div className="w-title">{clip.title}</div>
@@ -919,7 +945,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   async function start() {
     if (phase === "opening" || phase === "watching" || handle.current) return; // guard: never open two sessions
     const token = ++startToken.current;
-    setSummary(null); setSpent(0); setSecs(0); setServerOut(false); setEarned(0); setCapDisabled(false); setPhase("opening");
+    setSummary(null); setSpent(0); setSecs(0); setServerOut(false); setEarned(0); setDemoOut(false); skipRef.current = false; setPhase("opening");
     // Play INSTANTLY — don't make the viewer wait. The video starts now; the per-second
     // payment meter connects in the background and charging begins as soon as it's ready.
     if (video.current) { video.current.muted = false; video.current.play().catch(() => { if (video.current) { video.current.muted = true; video.current.play().catch(() => {}); } }); }
@@ -1045,7 +1071,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               <span className={"bignum out paystream-num" + (live && !outOfFunds ? " pulsing" : "")}>− {usd(spent)}</span>
             </div>
             <MoneyFlow dir="out" active={live && !outOfFunds} />
-            {!clip.live && (outOfFunds || earned > 0) && <>
+            {(outOfFunds || earned > 0) && <>
               <div className="paystream-row" style={{ marginTop: 10 }}>
                 <span className="paystream-label in">▲ ad refill · agent</span>
                 <span className={"bignum in paystream-num" + (outOfFunds ? " pulsing" : "")}>+ {usd(earned)}</span>
