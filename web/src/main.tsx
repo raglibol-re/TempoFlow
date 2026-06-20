@@ -2251,6 +2251,13 @@ function App() {
       setCampaigns(await fetchCampaigns());
       const initial = Number(adBudget);
       if (initial > 0) {
+        // Trial-credit accounts may not hold enough pathUSD to escrow the budget — top up
+        // from the treasury first so the on-chain escrow always succeeds.
+        const balNow = await fetchBalance(me.id).catch(() => 0);
+        if (balNow < initial + 0.05) {
+          await fundUser(me.id, Math.max(1, Math.ceil(initial + 1 - balNow))).catch(() => {});
+          await ensureKey(me).catch(() => {}); // make sure the wallet key is loaded for signing
+        }
         try {
           const r = await fundCampaign(me, ad.id, initial);
           setAdTx((m) => ({ ...m, [ad.id]: { kind: "escrow", tx: r.escrowTx, amountUsd: initial } }));

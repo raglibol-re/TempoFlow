@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45%" r="40%">
+      <stop offset="0" stop-color="#6d4ed6" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#6d4ed6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="logo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9b6bff"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="800" fill="#0a0d14"/>
+  <ellipse cx="600" cy="380" rx="520" ry="340" fill="url(#glow)"/>
+
+  <!-- brand -->
+  <rect x="74" y="58" width="50" height="50" rx="14" fill="url(#logo)"/>
+  <path d="M 92 73 L 92 93 L 110 83 Z" fill="#ffffff"/>
+  <text x="140" y="100" fill="#f2f5f8" font-size="36" font-weight="800">TempoFlow</text>
+  <text x="74" y="150" fill="#8a92a0" font-size="19">your attention to ads pays for your creator feed</text>
+
+  <!-- testnet pill -->
+  <rect x="966" y="66" width="160" height="40" rx="20" fill="#171b22" stroke="#2a2f3a"/>
+  <text x="1046" y="92" text-anchor="middle" fill="#aab2bf" font-size="16">Tempo · testnet</text>
+
+  <!-- OUT card -->
+  <rect x="74" y="238" width="330" height="318" rx="18" fill="#14171e" stroke="#232730"/>
+  <text x="239" y="302" text-anchor="middle" font-size="22" font-weight="800"><tspan fill="#f8556e">▶ OUT</tspan><tspan fill="#f8a0ad" font-weight="700">  to creators</tspan></text>
+  <text x="239" y="402" text-anchor="middle" fill="#f8556e" font-size="58" font-weight="800">$0.0168</text>
+  <text x="239" y="458" text-anchor="middle" fill="#8a92a0" font-size="22">−$0.0028 / s</text>
+
+  <!-- NET card (center, highlighted) -->
+  <rect x="435" y="222" width="330" height="334" rx="18" fill="#181b24" stroke="#6d4ed6" stroke-width="1.5"/>
+  <text x="600" y="290" text-anchor="middle" fill="#34d399" font-size="24" font-weight="800">NET</text>
+  <text x="475" y="392" fill="#cbd2db" font-size="46" font-weight="800">≈</text>
+  <text x="612" y="392" text-anchor="middle" fill="#f2f5f8" font-size="58" font-weight="800">$0.00</text>
+  <text x="600" y="446" text-anchor="middle" fill="#8a92a0" font-size="22">watched · cost nothing</text>
+
+  <!-- IN card -->
+  <rect x="796" y="238" width="330" height="318" rx="18" fill="#14171e" stroke="#232730"/>
+  <text x="961" y="302" text-anchor="middle" font-size="22" font-weight="800"><tspan fill="#34d399">◀ IN</tspan><tspan fill="#8fe6c4" font-weight="700">  from ads</tspan></text>
+  <text x="961" y="402" text-anchor="middle" fill="#34d399" font-size="58" font-weight="800">$0.0168</text>
+  <text x="961" y="458" text-anchor="middle" fill="#8a92a0" font-size="22">+$0.0028 / s</text>
+
+  <!-- flow dots (red → green) -->
+  <g>
+    <circle cx="150" cy="582" r="4.5" fill="#f8556e"/>
+    <circle cx="225" cy="582" r="4.5" fill="#ef6a6e"/>
+    <circle cx="300" cy="582" r="5" fill="#e08a55"/>
+    <circle cx="375" cy="582" r="5.5" fill="#d6a24a"/>
+    <circle cx="450" cy="582" r="5" fill="#bdb84a"/>
+    <circle cx="525" cy="582" r="5.5" fill="#9ac74e"/>
+    <circle cx="600" cy="582" r="6" fill="#7ccb66"/>
+    <circle cx="675" cy="582" r="5.5" fill="#67d089"/>
+    <circle cx="750" cy="582" r="5" fill="#4dd29a"/>
+    <circle cx="825" cy="582" r="5.5" fill="#3dd2ab"/>
+    <circle cx="900" cy="582" r="5" fill="#34d3b0"/>
+    <circle cx="975" cy="582" r="4.5" fill="#34d399"/>
+    <circle cx="1050" cy="582" r="4.5" fill="#34d399"/>
+  </g>
+
+  <!-- agent pill -->
+  <rect x="415" y="600" width="370" height="44" rx="22" fill="#191427" stroke="#6d4ed6" stroke-opacity="0.7"/>
+  <circle cx="452" cy="622" r="6" fill="#9b6bff"/>
+  <text x="470" y="629" fill="#e7eaf0" font-size="19" font-weight="800">agent balancing your feed</text>
+
+  <!-- footer -->
+  <text x="600" y="694" text-anchor="middle" fill="#8a92a0" font-size="18">every cent on-chain  ·  settled per second on Tempo</text>
+</svg>

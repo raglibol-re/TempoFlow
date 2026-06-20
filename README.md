@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="TempoFlow — your attention to ads pays for your creator feed" width="100%" />
+</p>
+
 # TempoFlow
 
 **A content feed where money flows in real time — _out_ to creators when you watch them,
