@@ -1140,14 +1140,23 @@ app.post("/tip", async (c) => {
   const viewer = getUser(String(b?.as ?? ""));
   const clip = getClip(String(b?.clipId ?? ""));
   if (!viewer || !clip) return c.json({ error: "bad as/clipId" }, 400);
-  const amount = Math.min(1, Math.max(0, Number(b?.amountUsd)));
+  if (!viewer.key) return c.json({ ok: false, reason: "no_key" }, 200);
+  const amount = Math.min(2, Math.max(0, Number(b?.amountUsd)));
   if (!(amount > 0)) return c.json({ error: "bad amount" }, 400);
-  const debit = appDebit(viewer.id, amount, "tip", { clipId: clip.id, creatorId: clip.ownerId });
-  if (!debit.ok) return c.json({ ok: false, reason: "insufficient_balance", balance: debit.balance }, 200);
-  appCredit(clip.ownerId, amount, "tip_earning", { clipId: clip.id, fromViewer: viewer.id });
+  // Tip on the SAME on-chain rail as watch payments: check the real pathUSD balance,
+  // then accrue into the viewer → creator stream and settle promptly (within the 7s
+  // batch). This is why the old in-app-balance debit "didn't work" — funds live on-chain.
+  const bal = await viewerBalanceCached(viewer.id, viewer.address);
+  if (bal < amount) return c.json({ ok: false, reason: "insufficient_balance", balance: bal }, 200);
+  const k = wKey(clip.id, viewer.id);
+  let w = watchPays.get(k);
+  if (!w) { w = { clipId: clip.id, viewerId: viewer.id, creatorAddr: clip.recipients[0]!.recipient, viewerKey: viewer.key, viewerName: viewer.name, creatorName: clip.creator, owedRaw: 0n, settledRaw: 0n, lastTs: Date.now() }; watchPays.set(k, w); }
+  w.owedRaw += parseUnits(amount.toFixed(6), TOKEN_DECIMALS);
   const creator = getUser(clip.ownerId);
-  ledger.record({ fromAddr: viewer.address, toAddr: creator?.address ?? clip.recipients[0]!.recipient, fromLabel: viewer.name, toLabel: clip.creator, amount, contentId: clip.id });
-  return c.json({ ok: true, balance: debit.balance, creator: clip.creator });
+  ledger.record({ fromAddr: viewer.address, toAddr: w.creatorAddr, fromLabel: viewer.name, toLabel: clip.creator, amount, contentId: clip.id });
+  balCache.set(viewer.id, { bal: bal - amount, ts: Date.now() }); // reflect the spend immediately
+  void settleWatch(0); // push it on-chain promptly so the creator sees it fast
+  return c.json({ ok: true, balance: bal - amount, creator: clip.creator });
 });
 
 // ── Feature 2: real-time second-price attention auction ──────────────────────

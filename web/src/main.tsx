@@ -1038,11 +1038,6 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
                 <span className={"bignum in paystream-num" + (live && earned > 0 ? " pulsing" : "")}>+ {usd(earned)}</span>
               </div>
               <MoneyFlow dir="in" active={live && earned > 0} />
-              <div className="paystream-net">
-                <span className="muted" style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px" }}>net balance</span>
-                <div className="paystream-net-num" style={{ color: earned - spent >= 0 ? "var(--in)" : "var(--out)" }}>{earned - spent >= 0 ? "+" : "−"} {usd(Math.abs(earned - spent))}</div>
-                <span className="muted" style={{ fontSize: 12 }}>{Math.abs(earned - spent) < 0.012 ? "watching costs ≈ €0 — ads pay it back" : `watched ${secs}s`}</span>
-              </div>
             </>}
           </div>
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
@@ -1861,7 +1856,7 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
     try {
       handle.current = await watchClip(clip, me,
         (tk: Tick) => { setOut(tk.spentUsd); video.current?.play().catch(() => {}); },
-        () => {});
+        {});
     } catch (e: any) { onError(e?.message ?? String(e)); activeRef.current = false; setPhase("idle"); return; }
     if (!activeRef.current) { handle.current?.stop().catch(() => {}); handle.current = null; return; }
     // IN — open the attention session; the advertiser agent pays per verified second.
@@ -2232,7 +2227,6 @@ function App() {
         />
         <div className="nav-right">
           <span className="pill" title="your real on-chain pathUSD balance">{balance != null ? fmtBal(balance) : "$…"} <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>pathUSD</span></span>
-          <span className="pill" title="net this session">net <b style={{ color: (net?.netUsd ?? 0) >= 0 ? "var(--in)" : "var(--out)" }}>{(net?.netUsd ?? 0) >= 0 ? "+" : "−"}{usd(Math.abs(net?.netUsd ?? 0))}</b></span>
           <a className="pill mono addr-pill" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`${me.address} — view your wallet on the Tempo explorer`} style={{ textDecoration: "none" }}>{shortAddr(me.address)} ↗</a>
           <button className="btn btn-sm" onClick={() => setTopupOpen(true)}>＋ Test funds</button>
           <button className="theme-toggle" onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle theme">{theme === "dark" ? "☀" : "☾"}</button>
