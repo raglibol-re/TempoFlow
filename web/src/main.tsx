@@ -2246,12 +2246,20 @@ function App() {
       // Create the ad UNFUNDED (no phantom budget), then escrow the initial amount
       // on-chain so its committed budget reflects real, refundable deposited funds.
       const ad = await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, 0);
+      // Show it in "Your ads" IMMEDIATELY — even if the on-chain escrow below fails, the ad
+      // must still appear (previously a funding error left it created but invisible).
+      setCampaigns(await fetchCampaigns());
       const initial = Number(adBudget);
       if (initial > 0) {
-        const r = await fundCampaign(me, ad.id, initial);
-        setAdTx((m) => ({ ...m, [ad.id]: { kind: "escrow", tx: r.escrowTx, amountUsd: initial } }));
+        try {
+          const r = await fundCampaign(me, ad.id, initial);
+          setAdTx((m) => ({ ...m, [ad.id]: { kind: "escrow", tx: r.escrowTx, amountUsd: initial } }));
+        } catch (e: any) {
+          setError(`Ad published, but the on-chain escrow failed (${e?.message ?? e}). Fund it from "Your ads" below.`);
+        }
+        setCampaigns(await fetchCampaigns());
       }
-      setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setCampaigns(await fetchCampaigns()); setBalance(await fetchBalance(me.id));
+      setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setBalance(await fetchBalance(me.id));
     }
     catch (e: any) { setError(e?.message ?? String(e)); } setPublishingAd(false);
   }
