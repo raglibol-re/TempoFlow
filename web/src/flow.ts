@@ -159,6 +159,10 @@ export interface AdMatch { match: Campaign | null; reason: string; matchedTags: 
 export const matchAd = (tags: string[], exclude: string[] = []) =>
   jget(`/agent/match-ad?tags=${encodeURIComponent(tags.join(","))}&exclude=${encodeURIComponent(exclude.join(","))}`, "match ad")
     .catch(() => ({ match: null, reason: "agent offline", matchedTags: [], interest: tags })) as Promise<AdMatch>;
+/** Recent on-chain ad-payout receipts (operator → you) for the agent's earnings. */
+export interface AdReceipt { txHash: string; amountUsd: number; ts: number }
+export const fetchAdReceipts = (as: string) =>
+  jget(`/agent/receipts?as=${encodeURIComponent(as)}`, "load ad receipts").then((j) => (j.receipts ?? []) as AdReceipt[]).catch(() => [] as AdReceipt[]);
 
 // ── Feature 3: pay-per-token creator AI (NDJSON stream) ──────────────────────
 export interface AskEvent { type: "start" | "token" | "done" | "out-of-balance" | "error"; text?: string; tokens?: number; costUsd?: number; balance?: number; via?: string; pricePerToken?: number; creator?: string; error?: string }
@@ -493,7 +497,10 @@ export async function watchClip(
         // vouchers already paid the creator, and any unspent deposit auto-refunds when the
         // channel lapses (or the server's in-memory store was reset). This is NOT a user
         // error — return a best-effort summary instead of a scary toast.
-        if (/channel not found|not found|410|already|expired|no .*channel/i.test(msg)) {
+        // Missing/expired channel, or a voucher/spent mismatch on close: the per-second
+        // vouchers already paid the creator and any unspent deposit auto-refunds — not a
+        // user error. Return a best-effort summary instead of a scary toast.
+        if (/channel not found|not found|410|402|already|expired|voucher|verification|no .*channel/i.test(msg)) {
           return { spentUsd: undefined, seconds: undefined, txHash: undefined, channelId: undefined };
         }
         throw new Error(`settle/refund failed: ${msg}`);

@@ -737,6 +737,59 @@ app.post("/campaigns/:id/stop", async (c) => {
 
 // ── Attention proofing (gate input) ─────────────────────────────────────────
 // Open a session → returns the token every heartbeat must carry (L3 binding).
+// ── Server-driven ad payout (the autonomous agent pays the viewer) ───────────
+// While the viewer's attention is VERIFIED (their heartbeats pass the gate), the
+// operator pays them on behalf of the matched advertiser. We record each fresh second
+// instantly (so earnings show live + the campaign budget/refund track) and batch-settle
+// the accrued amount on-chain (operator → viewer) every few seconds. No spawned process
+// → reliable. This replaces the fragile spawn-an-agent-per-watch path for earning.
+interface Earning { campaignId: string; viewerId: string; viewerAddr: `0x${string}`; advertiser: string; viewerName: string; owedRaw: bigint; settledRaw: bigint; lastTs: number }
+const earnings = new Map<string, Earning>();
+const adReceipts = new Map<string, { txHash: string; amountUsd: number; ts: number }[]>(); // viewerId → settlement receipts
+const eKey = (c: string, v: string) => `${c}:${v}`;
+
+/** Accrue one fresh second of ad reward for (campaign, viewer): records it to the
+ *  ledger (live + budget) and queues it for on-chain settlement. */
+function accrueEarning(campaignId: string, viewerId: string) {
+  const camp = getCampaign(campaignId); const viewer = getUser(viewerId);
+  if (!camp || !viewer) return;
+  if (campaignRemaining(camp) <= 0) return; // funded budget exhausted → stop paying
+  const rate = attention.getRewardRate(campaignId, viewerId) ?? Number(camp.pricePerSec);
+  const k = eKey(campaignId, viewerId);
+  const now = Date.now();
+  let e = earnings.get(k);
+  if (!e) { earnings.set(k, { campaignId, viewerId, viewerAddr: viewer.address, advertiser: camp.advertiser, viewerName: viewer.name, owedRaw: 0n, settledRaw: 0n, lastTs: now }); return; }
+  const elapsed = Math.min(2, (now - e.lastTs) / 1000); e.lastTs = now;
+  const amt = +(rate * elapsed).toFixed(6);
+  if (amt <= 0) return;
+  ledger.record({ fromAddr: operatorAddress, toAddr: viewer.address, fromLabel: camp.advertiser, toLabel: viewer.name, amount: amt, contentId: campaignId });
+  e.owedRaw += parseUnits(amt.toFixed(6), TOKEN_DECIMALS);
+}
+
+let settling = false;
+/** Batch-settle accrued ad rewards on-chain (operator → viewer). minUsd=0 flushes. */
+async function settleEarnings(minUsd = 0.003) {
+  if (settling) return; settling = true;
+  const min = parseUnits(minUsd.toFixed(6), TOKEN_DECIMALS);
+  try {
+    for (const e of earnings.values()) {
+      const delta = e.owedRaw - e.settledRaw;
+      if (delta <= 0n || delta < min) continue;
+      e.settledRaw = e.owedRaw; // optimistic: avoid double-paying if the tx is slow
+      try {
+        const tx = await settlementClient.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [e.viewerAddr, delta], chain: tempoTestnet as any });
+        const list = adReceipts.get(e.viewerId) ?? []; list.unshift({ txHash: tx as string, amountUsd: Number(delta) / 10 ** TOKEN_DECIMALS, ts: Date.now() });
+        adReceipts.set(e.viewerId, list.slice(0, 25));
+        console.log(`[ad-payout] operator → ${e.viewerName} +${Number(delta) / 10 ** TOKEN_DECIMALS} pathUSD tx ${tx}`);
+      } catch (err) { e.settledRaw -= delta; console.error("[ad-payout] settle failed:", (err as Error).message); }
+    }
+  } finally { settling = false; }
+}
+setInterval(() => { void settleEarnings(); }, 7000).unref?.();
+
+/** Recent on-chain ad-payout receipts for a viewer (for receipt links in the UI). */
+app.get("/agent/receipts", (c) => c.json({ receipts: adReceipts.get(c.req.query("as") ?? "") ?? [] }));
+
 app.post("/attention/session", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const campaignId = String(b?.campaignId ?? "");
@@ -758,13 +811,14 @@ app.post("/heartbeat", async (c) => {
   const campaignId = b?.campaignId ?? c.req.query("campaignId");
   const viewer = b?.viewer ?? c.req.query("viewer");
   if (!campaignId || !viewer) return c.json({ ok: false, reason: "no-session", challenge: null });
-  return c.json(
-    attention.heartbeat(String(campaignId), String(viewer), b?.token, {
-      visible: b?.visible,
-      playing: b?.playing,
-      onScreen: b?.onScreen,
-    }),
-  );
+  const res = attention.heartbeat(String(campaignId), String(viewer), b?.token, {
+    visible: b?.visible,
+    playing: b?.playing,
+    onScreen: b?.onScreen,
+  });
+  // Verified attention → the operator pays the viewer for this second (the agent's payout).
+  if (res.ok && !res.paused) accrueEarning(String(campaignId), String(viewer));
+  return c.json(res);
 });
 
 // Answer the outstanding challenge → payment resumes immediately.
@@ -792,9 +846,14 @@ app.post("/demo/run-ad", async (c) => {
 // graceful-stop flags (shared by /watch and /attention)
 const stopRequested = new Set<string>();
 app.post("/watch/:id/stop", (c) => (stopRequested.add(c.req.param("id")), c.json({ ok: true })));
-app.post("/attention/:campaignId/:viewerId/stop", (c) =>
-  (stopRequested.add(`${c.req.param("campaignId")}:${c.req.param("viewerId")}`), c.json({ ok: true })),
-);
+app.post("/attention/:campaignId/:viewerId/stop", async (c) => {
+  const cid = c.req.param("campaignId"), vid = c.req.param("viewerId");
+  stopRequested.add(`${cid}:${vid}`);
+  await settleEarnings(0); // flush any accrued reward on-chain before clearing
+  attention.endSession(cid, vid);
+  earnings.delete(eKey(cid, vid));
+  return c.json({ ok: true });
+});
 
 app.get("/api/watch/:id", async (c) => {
   const clip = getClip(c.req.param("id"));

@@ -17,7 +17,7 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, matchAd, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -636,6 +636,7 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: De
   const [ad, setAd] = useState<Campaign | null>(null);
   const [reason, setReason] = useState("reading your interests…");
   const [earned, setEarned] = useState(0);
+  const [lastTx, setLastTx] = useState<string | undefined>(undefined);
   const [visible, setVisible] = useState(true);
   const [onScreen, setOnScreen] = useState(true);
   const box = useRef<HTMLDivElement | null>(null);
@@ -661,13 +662,16 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: De
     if (!ad || !active) return;
     let alive = true; baseline.current = null;
     openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
+    // Heartbeats ARE the payout trigger: when the server verifies attention, the operator
+    // pays this viewer per second (server-driven — no spawned process). We just poll the
+    // on-chain earnings + the latest settlement receipt.
     const beat = () => { void sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current, playing: true, onScreen: scrRef.current }); };
     beat(); const beatId = setInterval(beat, 1000);
-    const pumpId = setInterval(() => { if (visRef.current && scrRef.current) runAd(ad.id, me.id); }, 4000); runAd(ad.id, me.id);
     const netId = setInterval(async () => {
       try { const n = await fetchNet(me.id); if (baseline.current == null) baseline.current = n.inUsd; const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6); if (alive) { setEarned(e); onEarned(e); } } catch { /* keep last */ }
+      try { const r = await fetchAdReceipts(me.id); if (alive && r[0]) setLastTx(r[0].txHash); } catch { /* keep last */ }
     }, 1500);
-    return () => { alive = false; clearInterval(beatId); clearInterval(pumpId); clearInterval(netId); stopAd(ad.id, me.id); };
+    return () => { alive = false; clearInterval(beatId); clearInterval(netId); stopAd(ad.id, me.id); };
   }, [ad?.id, me.id, active]);
 
   return (
@@ -681,7 +685,7 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: De
         <div className="muted" style={{ fontSize: 12 }}>matched <b>{ad.title ?? ad.advertiser}</b> — {reason}</div>
         <div className="bignum in" style={{ fontSize: 26 }}>+ {usd(earned)}</div>
         <div className="muted" style={{ fontSize: 11.5 }}>{!active ? "starts paying once your watch session is live…" : earning ? "paying you per verified second → settled on-chain" : "keep the ad on screen to keep earning"}</div>
-        <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" style={{ marginTop: 6, display: "inline-block" }}>↗ on-chain receipts (your wallet)</a>
+        <a className="tx" href={lastTx ? explorerTxUrl(lastTx) : explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" style={{ marginTop: 6, display: "inline-block" }}>{lastTx ? `↗ on-chain receipt · ${lastTx.slice(0, 10)}…` : "↗ on-chain receipts (your wallet)"}</a>
       </>) : <div className="muted" style={{ fontSize: 12.5 }}>{reason}</div>}
     </div>
   );
