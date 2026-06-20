@@ -9,7 +9,7 @@ import { getUser } from "./users.js";
 import {
   clipsCount, clipsAll, clipById, clipInsert, clipSetPrice,
   campaignsCount, campaignsAll, campaignById, campaignInsert, campaignSetBudget,
-  clipSetVideo, campaignSetVideo, clipUpdateMeta, clipDelete,
+  clipSetVideo, campaignSetVideo, clipUpdateMeta, clipDelete, getMeta, setMeta,
   type CampaignRow,
 } from "./db.js";
 
@@ -24,6 +24,9 @@ const SEED_VIDEO: Record<string, string> = {
 };
 
 export function initContent(): void {
+  // Seed the demo content only ONCE ever. After a clean-slate wipe (/admin/reset-content)
+  // this flag stays set, so a restart won't re-add the old seed videos/ads.
+  if (getMeta("contentSeeded") === "1") return;
   if (clipsCount() === 0) {
     const addr = (id: string) => getUser(id)?.address ?? PLATFORM;
     const handle = (id: string) => getUser(id)?.handle ?? id;
@@ -63,6 +66,7 @@ export function initContent(): void {
     const campaign = campaignById(id);
     if (campaign && !campaign.hasVideo) campaignSetVideo(id, url);
   }
+  setMeta("contentSeeded", "1"); // never auto-seed again (survives a clean-slate wipe)
 }
 
 export const getClips = () => clipsAll();

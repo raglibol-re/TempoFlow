@@ -467,6 +467,18 @@ export function campaignById(id: string): CampaignRow | undefined {
   const r = db.prepare("SELECT * FROM campaigns WHERE id=?").get(id);
   return r ? rowToCampaign(r) : undefined;
 }
+// App metadata (key/value): e.g. a flag so demo content seeds only ONCE — a content
+// wipe then survives a restart instead of being re-seeded.
+db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
+export function getMeta(key: string): string | null { const r = db.prepare("SELECT value FROM app_meta WHERE key=?").get(key) as any; return r?.value ?? null; }
+export function setMeta(key: string, value: string): void { db.prepare("INSERT OR REPLACE INTO app_meta(key,value) VALUES(?,?)").run(key, value); }
+/** Clean slate: wipe all clips + campaigns (and their child rows). Used by /admin/reset-content. */
+export function wipeContent(): void {
+  for (const t of ["clip_likes", "clip_comments", "clip_second_popularity", "clips", "campaigns"]) {
+    try { db.exec(`DELETE FROM ${t}`); } catch { /* table may not exist */ }
+  }
+}
+
 export function campaignInsert(c: CampaignRow) {
   db.prepare(`INSERT OR REPLACE INTO campaigns
     (id,advertiser,ownerId,title,tags,pricePerSec,maxBudget,hasVideo,videoPath,thumb)

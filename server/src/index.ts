@@ -54,7 +54,7 @@ import {
   campaignAddEscrow, campaignStop,
   clipLikeToggle, clipLikeCount, clipLikedBy, commentInsert, commentsForClip,
   chatInsert, chatForClip, clipIncViews, clipViews, videoPathOf,
-  clipSecondWatchCounts,
+  clipSecondWatchCounts, wipeContent, setMeta,
   type GoalRow,
 } from "./db.js";
 import { runAd, isAdRunning } from "./adrunner.js";
@@ -310,6 +310,13 @@ app.post("/admin/drain", async (c) => {
     } catch (e) { results.push({ user: u.id, balance: bal, error: (e as Error).message }); }
   }
   return c.json({ ok: true, target, results });
+});
+
+// ── Admin: clean slate — delete ALL clips + ads so only new content remains ─────
+app.post("/admin/reset-content", (c) => {
+  wipeContent();
+  setMeta("contentSeeded", "1"); // don't re-seed the old demo content on restart
+  return c.json({ ok: true });
 });
 
 app.post("/api/stripe/create-topup-checkout-session", async (c) => {
