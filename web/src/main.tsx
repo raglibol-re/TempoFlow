@@ -1078,7 +1078,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               </div>
               <MoneyFlow dir="in" active={outOfFunds} />
             </>}
-            {!clip.live && !outOfFunds && earned === 0 && <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>🤖 Free to watch — if your balance runs low, your agent auto-plays a matching ad to refill you.</div>}
+            {!outOfFunds && earned === 0 && <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>🤖 Free to watch — if your balance runs low, your agent auto-plays a matching ad to refill you.</div>}
           </div>
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
@@ -1101,7 +1101,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             );
           })()}
         </div>
-        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={outOfFunds} outOfFunds={outOfFunds} />}
+        <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={outOfFunds} outOfFunds={outOfFunds} />
         </div>
       </div>
 
