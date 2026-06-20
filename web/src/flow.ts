@@ -443,7 +443,7 @@ export async function uploadClip(as: string, title: string, tags: string[], file
 export const setClipPrice = (clipId: string, as: string, pricePerSec: string) =>
   jpost(`/clips/${clipId}/price`, { as, pricePerSec }, "update price").then((j) => j.clip as Clip);
 
-export interface Tick { second: number; spentUsd: number; creator: string; clipId: string; outOfFunds: boolean }
+export interface Tick { second: number; spentUsd: number; creator: string; clipId: string; outOfFunds: boolean; paying: boolean }
 /** Result of settling (closing) a payment channel — straight from the on-chain
  *  receipt. `refundUsd` is computed by the caller against the deposit it showed. */
 export interface CloseSummary { spentUsd?: number; seconds?: number; txHash?: string; channelId?: string }
@@ -490,9 +490,12 @@ export async function watchClip(
       const r = await jpost("/watch-tick", { as: me.id, clipId: clip.id, visible, playing: true, pause }, "watch tick");
       if (stopped) return;
       const outOfFunds = !!r?.outOfFunds;
-      // Only advance the paid-second counter when the server actually charged.
-      if (!r?.paused && !outOfFunds) { sec++; if (typeof r?.spentUsd === "number") lastSpent = r.spentUsd; }
-      onTick({ second: sec, spentUsd: lastSpent, creator: clip.creator, clipId: clip.id, outOfFunds });
+      // `paying` = this second actually charged the creator (money is flowing). The video
+      // is gated on this: it plays ONLY while money flows, and stops the moment it doesn't
+      // (out of funds, paused, or tab hidden) — ad or no ad.
+      const paying = !!r?.ok && !r?.paused && !outOfFunds;
+      if (paying) { sec++; if (typeof r?.spentUsd === "number") lastSpent = r.spentUsd; }
+      onTick({ second: sec, spentUsd: lastSpent, creator: clip.creator, clipId: clip.id, outOfFunds, paying });
     } catch { /* transient network blip — keep ticking */ }
   };
   void tick();

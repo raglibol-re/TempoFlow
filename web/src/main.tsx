@@ -903,6 +903,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [bufferedTime, setBufferedTime] = useState(0);
   const [popularity, setPopularity] = useState<SecondPopularity[]>([]);
   const [serverOut, setServerOut] = useState(false);   // server: your on-chain balance < price/sec
+  const [paying, setPaying] = useState(false);         // is money actually flowing to the creator right now? (video plays only while true)
   const [demoOut, setDemoOut] = useState(false);       // refill episode active (timer-driven loop)
   const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
@@ -1006,9 +1007,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    if ((phase === "watching" || phase === "opening") && !outOfFunds && !streamEnded) v.play().catch(() => {});
+    // The video plays ONLY while money is flowing to the creator (the per-second charge is
+    // landing) — "opening" gets a brief grace so playback starts instantly. The moment the
+    // charge stops (out of funds, paused, tab hidden) the video stops, ad or no ad.
+    const moneyFlowing = phase === "opening" || (phase === "watching" && paying);
+    if (moneyFlowing && !streamEnded) v.play().catch(() => {});
     else v.pause();
-  }, [outOfFunds, phase, streamEnded]);
+  }, [paying, phase, streamEnded]);
 
   // SOUND-ONLY: when the takeover ad shows, best-effort UNMUTE it (the creator video is
   // already paused, and the page has audio permission from the watch click). It autoplays
@@ -1030,7 +1035,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
       const nextHandle = await watchClip(clip, me,
         (t: Tick) => {
           if (token !== startToken.current) return;
-          setPhase("watching"); setSpent(t.spentUsd); setSecs(t.second); setServerOut(t.outOfFunds);
+          setPhase("watching"); setSpent(t.spentUsd); setSecs(t.second); setServerOut(t.outOfFunds); setPaying(t.paying);
           setPopularity((prev) => incrementPopularity(prev, t.second - 1));
         },
         { shouldPause: () => pauseRef.current });
@@ -1190,16 +1195,25 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
           <div className="adpop">
             {agentAd?.hasVideo
               ? <video ref={adpopVideo} src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="adpop-video" />
-              : <div className="adpop-emoji">{agentAd?.thumb ?? "📣"}</div>}
-            <span className="adpop-tag">● AD · your agent</span>
+              : <div className="adpop-emoji">{agentAd ? (agentAd.thumb ?? "📣") : "⛔"}</div>}
+            <span className="adpop-tag">{agentAd ? "● AD · your agent" : "● paused"}</span>
             <div className="adpop-copy">
-              <div className="adpop-title">⛔ Out of funds — your agent took over</div>
-              <div className="adpop-sub">Playing a matching ad to refill you — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Watching resumes automatically the moment you’re back in credit.</div>
-              <div className="adpop-actions">
-                <button className="btn btn-sm" onClick={() => { skipRef.current = true; setDemoOut(false); }}>▶ Skip ad</button>
-                <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
-              </div>
+              {agentAd ? (<>
+                <div className="adpop-title">⛔ Out of funds — your agent took over</div>
+                <div className="adpop-sub">Playing a matching ad to refill you — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Watching resumes automatically the moment you’re back in credit.</div>
+                <div className="adpop-actions">
+                  <button className="btn btn-sm" onClick={() => { skipRef.current = true; setDemoOut(false); }}>▶ Skip ad</button>
+                  <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
+                </div>
+              </>) : (<>
+                <div className="adpop-title">⛔ Out of funds — playback paused</div>
+                <div className="adpop-sub">The video only plays while you’re paying the creator. Add funds to keep watching — no ad is bidding right now to refill you.</div>
+                <div className="adpop-actions">
+                  <button className="btn btn-sm" onClick={onTopup}>＋ Add funds</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
+                </div>
+              </>)}
             </div>
           </div>
         </div>
