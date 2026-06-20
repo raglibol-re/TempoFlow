@@ -909,7 +909,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
   const [agentAd, setAgentAd] = useState<Campaign | null>(null); // the ad the agent matched (for the out-of-funds takeover)
   const [summary, setSummary] = useState<CloseSummary | null>(null);
-  const [low, setLow] = useState(true); // default ON: snappy net≤0 refill loop (reads live ledger, instant recovery) — smooth + no faucet. Uncheck to just watch.
+  const [low, setLow] = useState(false); // demo simulation OFF — out-of-funds is driven only by the REAL wallet balance now
   const [fullscreen, setFullscreen] = useState(false);
   const [fsControls, setFsControls] = useState(true);
   const handle = useRef<WatchHandle | null>(null);
@@ -925,14 +925,14 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collab = clip.recipients.length > 1;
   const price = Number(clip.pricePerSec);
-  // Out of funds = a demo refill episode is active OR the server says your real balance ran
-  // below the per-second price. The ad does NOT play alongside the video — you watch and your
-  // balance drains; when it runs low this flips on, the video pauses + blurs, the agent's ad
-  // takes over and refills you, then it flips back off and watching resumes on its own.
-  const outOfFunds = (demoOut || serverOut) && phase === "watching";
-  pauseRef.current = demoOut; // freeze the on-chain charging while the agent refills you
-  spentRef.current = spent; earnedRef.current = earned; // keep the refill-loop refs live
-  adReadyRef.current = !!agentAd; // only run the refill loop when the agent actually has an ad to show
+  // Out of funds = the server says your REAL on-chain balance ran below the per-second price.
+  // ONLY the real wallet state drives this — never a simulation — so the video, blur and ad
+  // takeover never trigger while you still have funds. When the wallet truly empties, the
+  // video stops + blurs + the agent's matching ad (if any) refills you, then it resumes.
+  const outOfFunds = serverOut && phase === "watching";
+  pauseRef.current = false; // never freeze charging from the client — money flows whenever you have funds
+  spentRef.current = spent; earnedRef.current = earned;
+  adReadyRef.current = !!agentAd;
   const live = phase === "watching";
   const broke = balance != null && balance < price; // not enough real pathUSD to even start
 
@@ -1170,7 +1170,6 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               ? <button className="btn btn-ghost" onClick={() => void stopWatch()} style={{ flex: 1 }}>{phase === "opening" ? "opening…" : "■ Stop watching"}</button>
               : <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "stopped" ? "▶ Watch again" : "▶ Watch"}</button>}
           </div>
-          <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Auto-refill — your agent plays a matching ad to top you up when you run low (on by default; uncheck to just watch)</label>
           {summary && (() => {
             const paid = summary.spentUsd ?? spent;
             return (
