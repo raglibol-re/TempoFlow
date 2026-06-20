@@ -291,13 +291,22 @@ app.post("/admin/drain", async (c) => {
     if (u.address.toLowerCase() === operatorAddress.toLowerCase()) { results.push({ user: u.id, skipped: "operator (treasury)" }); continue; }
     let bal: number;
     try { bal = await pathUsdBalance(u.address); } catch { results.push({ user: u.id, skipped: "balance read failed" }); continue; }
-    const excess = +(bal - target).toFixed(6);
-    if (excess <= 1) { results.push({ user: u.id, balance: bal, drained: 0 }); continue; }
+    const diff = +(target - bal).toFixed(6); // >0 ⇒ top up, <0 ⇒ drain excess
+    if (Math.abs(diff) <= 0.5) { results.push({ user: u.id, balance: bal, ok: true }); continue; }
     try {
-      const wallet = createWalletClient({ account: privateKeyToAccount(u.key as `0x${string}`), chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
-      const tx = await wallet.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [operatorAddress, parseUnits(excess.toFixed(6), TOKEN_DECIMALS)], chain: tempoTestnet as any });
-      balCache.delete(u.id); // bust the cached balance so the UI reflects the drain
-      results.push({ user: u.id, was: bal, drained: excess, tx });
+      if (diff < 0) {
+        // over target → drain excess (user → operator treasury)
+        const wallet = createWalletClient({ account: privateKeyToAccount(u.key as `0x${string}`), chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+        const tx = await wallet.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [operatorAddress, parseUnits((-diff).toFixed(6), TOKEN_DECIMALS)], chain: tempoTestnet as any });
+        balCache.delete(u.id);
+        results.push({ user: u.id, was: bal, drained: -diff, tx });
+      } else {
+        // under target → top up from the operator treasury (skip empty/abandoned $0 accounts)
+        if (bal < 0.01) { results.push({ user: u.id, balance: bal, skipped: "empty" }); continue; }
+        const tx = await settlementClient.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [u.address, parseUnits(diff.toFixed(6), TOKEN_DECIMALS)], chain: tempoTestnet as any });
+        balCache.delete(u.id);
+        results.push({ user: u.id, was: bal, topped: diff, tx });
+      }
     } catch (e) { results.push({ user: u.id, balance: bal, error: (e as Error).message }); }
   }
   return c.json({ ok: true, target, results });
