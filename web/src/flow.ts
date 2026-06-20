@@ -120,7 +120,7 @@ export const fetchUsers = () => jget("/demo/users", "load users").then((j) => j.
 export const fetchFeed = () => jget("/feed", "load feed").then((j) => (j.clips ?? []) as Clip[]);
 export const fetchCampaigns = () => jget("/campaigns", "load campaigns").then((j) => (j.campaigns ?? []) as Campaign[]);
 export const fetchAdminUsers = () => jget("/admin/users", "load admin users").then((j) => (j.users ?? []) as AdminUser[]);
-export const fundUser = (userId: string) => jpost("/demo/fund", { userId }, "get test funds");
+export const fundUser = (userId: string, amountUsd = 5) => jpost("/demo/fund", { userId, amountUsd }, "get test funds");
 export const createCampaign = (as: string, tags: string[]) => jpost("/campaigns", { as, tags }, "create campaign").then((j) => j.campaign as Campaign);
 export const resetNet = () => jpost("/reset", {}, "reset").catch(() => {});
 /** A challenge the viewer must answer to prove they're watching (Layer 2). */

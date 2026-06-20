@@ -266,13 +266,15 @@ app.post("/demo/fund", async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const user = getUser(String(b?.userId ?? ""));
   if (!user) return c.json({ error: "unknown user" }, 400);
-  // Credit the SPENDABLE app balance (this is what watch/tip/ask/pledge debit) — do
-  // this first so funding always works even if the testnet faucet is slow/down.
-  const { balance } = appCredit(user.id, 5, "demo_faucet");
-  // Best-effort: also top up the real on-chain pathUSD wallet (so MPP channels +
-  // on-chain settlement have funds). Never fail the request if the faucet hiccups.
+  const amount = Math.min(50, Math.max(1, Number(b?.amountUsd) || 5)); // realistic test top-up ($1–$50)
+  const { balance } = appCredit(user.id, amount, "demo_faucet");
+  // Real on-chain top-up: transfer the requested pathUSD from the operator treasury.
+  // NOT the testnet faucet (tempo_fundAddress) — that dumps ~1M and makes balances
+  // unrealistic. Best-effort; never fail the request if the transfer hiccups.
   let tx: string | null = null;
-  try { tx = await fundWallet(user.address, "5"); } catch { /* faucet busy — app credit still applied */ }
+  try {
+    tx = (await settlementClient.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [user.address, parseUnits(amount.toFixed(6), TOKEN_DECIMALS)], chain: tempoTestnet as any })) as string;
+  } catch { /* operator transfer hiccup — app credit still applied */ }
   return c.json({ ok: true, tx, balance });
 });
 

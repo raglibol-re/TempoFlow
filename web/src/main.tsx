@@ -60,6 +60,17 @@ function BrandMark({ size = 24 }: { size?: number }) {
 }
 
 // ───────────────────────── money-flow canvas ─────────────────────────
+function parseRgb(s: string): [number, number, number] {
+  s = (s || "").trim();
+  if (s.startsWith("#")) {
+    let h = s.slice(1);
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  const m = s.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [128, 128, 128];
+}
+
 function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const on = useRef(active); on.current = active;
@@ -67,7 +78,14 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
     const cv = ref.current!; const ctx = cv.getContext("2d")!;
     const dpr = window.devicePixelRatio || 1;
     const W = (cv.width = cv.offsetWidth * dpr), H = (cv.height = 44 * dpr);
-    const col = dir === "out" ? [255, 93, 115] : [43, 217, 160];
+    // Use the THEME's own money colors (CSS vars are tuned per light/dark) + re-read on
+    // theme toggle, so the stream looks right in both modes (and the glow is softer on light).
+    const root = document.documentElement;
+    const readCol = (): [number, number, number] => parseRgb(getComputedStyle(root).getPropertyValue(dir === "out" ? "--out" : "--in"));
+    const isDark = () => root.getAttribute("data-theme") === "dark";
+    let col = readCol(); let dark = isDark();
+    const obs = new MutationObserver(() => { col = readCol(); dark = isDark(); });
+    obs.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
     const ps: { x: number; y: number; v: number; r: number; a: number }[] = [];
     let raf = 0, acc = 0;
     const loop = () => {
@@ -80,11 +98,12 @@ function MoneyFlow({ dir, active }: { dir: "in" | "out"; active: boolean }) {
         const p = ps[i]!; p.x += p.v; p.a -= 0.004;
         if (p.a <= 0 || p.x < -10 || p.x > W + 10) { ps.splice(i, 1); continue; }
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${p.a})`;
-        ctx.shadowBlur = 8 * dpr; ctx.shadowColor = `rgba(${col[0]},${col[1]},${col[2]},.9)`; ctx.fill();
+        ctx.shadowBlur = (dark ? 8 : 3) * dpr; ctx.shadowColor = `rgba(${col[0]},${col[1]},${col[2]},${dark ? 0.9 : 0.45})`; ctx.fill();
       }
+      ctx.shadowBlur = 0;
       raf = requestAnimationFrame(loop);
     };
-    loop(); return () => cancelAnimationFrame(raf);
+    loop(); return () => { cancelAnimationFrame(raf); obs.disconnect(); };
   }, [dir]);
   return <canvas ref={ref} className="flowcanvas" />;
 }
@@ -694,8 +713,8 @@ function LiveChat({ clipId, me }: { clipId: string; me: DemoUser }) {
   );
 }
 
-const WATCH_WINDOW_S = 14; // demo refill loop: watch this long before your credit "runs low"
-const AD_WINDOW_S = 6;     // …then the refill ad plays this long before auto-resuming
+const LOW_CAP = 0.024; // refill kicks in once you've NET-spent this much while watching
+const MAX_AD_S = 12;   // anti-stuck: the refill ad never runs longer than this
 
 /** Autonomous interest-matching ad agent (DETERMINISTIC — no API key). While you watch,
  *  it reads what you're into (the clip's tags), auto-picks the funded ad that best
@@ -897,6 +916,8 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const video = useRef<HTMLVideoElement | null>(null);
   const pauseRef = useRef(false); // freeze creator charging while the agent's ad refills you
   const skipRef = useRef(false);  // "Skip ▶" → end the current refill ad immediately
+  const spentRef = useRef(0);     // live spent/earned for the net≤0 refill loop (avoids stale closures)
+  const earnedRef = useRef(0);
   const startToken = useRef(0);
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collab = clip.recipients.length > 1;
@@ -907,6 +928,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   // takes over and refills you, then it flips back off and watching resumes on its own.
   const outOfFunds = (demoOut || serverOut) && phase === "watching";
   pauseRef.current = demoOut; // freeze the on-chain charging while the agent refills you
+  spentRef.current = spent; earnedRef.current = earned; // keep the refill-loop refs live
   const live = phase === "watching";
   const broke = balance != null && balance < price; // not enough real pathUSD to even start
 
@@ -953,21 +975,23 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
     };
   }, []);
 
-  // Refill loop — DETERMINISTIC & timer-driven so it can NEVER get stuck: you watch for
-  // WATCH_WINDOW_S, then your credit "runs low" and the agent's matching ad takes over to
-  // refill you for AD_WINDOW_S, then it auto-resumes — repeat. The real on-chain money
-  // flows underneath (creator charged while watching; agent pays you while the ad runs);
-  // this just drives the UI timing reliably instead of racing the on-chain settle lag.
-  // "Skip ▶" (skipRef) ends the current ad immediately. Toggle off to just watch.
+  // Refill loop — NET ≤ 0 so watching never mints you money (no faucet): you watch until
+  // you've NET-spent LOW_CAP, then the agent's matching ad refills you back to break-even
+  // (earned catches spent), then it auto-resumes. A MAX_AD_S cap guarantees it can never
+  // get stuck even if earning stalls. Free/own clips never trigger it (you only spend on
+  // OTHER creators), so you can't earn by watching yourself. Real on-chain money flows
+  // underneath. "Skip ▶" (skipRef) ends the current ad immediately. Toggle off to just watch.
   useEffect(() => {
     if (!low || phase !== "watching") { setDemoOut(false); return; }
-    let watchSecs = 0, adSecs = 0;
-    setDemoOut(false);
+    let adSecs = 0;
     const id = setInterval(() => {
-      if (skipRef.current) { skipRef.current = false; watchSecs = 0; adSecs = 0; setDemoOut(false); return; }
+      if (skipRef.current) { skipRef.current = false; adSecs = 0; setDemoOut(false); return; }
+      const sp = spentRef.current, ea = earnedRef.current;
       setDemoOut((prev) => {
-        if (!prev) { watchSecs += 1; if (watchSecs >= WATCH_WINDOW_S) { adSecs = 0; return true; } return false; }
-        adSecs += 1; if (adSecs >= AD_WINDOW_S) { watchSecs = 0; return false; } return true;
+        if (!prev) { if (sp - ea >= LOW_CAP) { adSecs = 0; return true; } return false; } // ran low → refill
+        adSecs += 1;
+        if (ea >= sp || adSecs >= MAX_AD_S) return false; // broke even (net 0) or anti-stuck cap → resume
+        return true;
       });
     }, 1000);
     return () => clearInterval(id);
@@ -1771,9 +1795,8 @@ function TopupModal({ me, onClose, onError, onFunded }: { me: DemoUser; onClose:
   async function addTestFunds() {
     setBusy(true);
     try {
-      const rounds = Math.max(1, Math.round(amount / 5));
-      for (let i = 0; i < rounds; i++) await fundUser(me.id);
-      onFunded(`✓ Added ${usd(rounds * 5)} test funds. No real card payment was made.`);
+      await fundUser(me.id, amount);
+      onFunded(`✓ Added ${usd(amount)} test funds. No real card payment was made.`);
       onClose();
     } catch (e: any) {
       onError(e?.message ?? String(e));
