@@ -2233,14 +2233,17 @@ function App() {
 
   useEffect(() => {
     if (!me) return;
-    setView("home");
+    // Poll balances/net/campaigns. Keyed on the ACCOUNT id (not the whole `me` object) so a
+    // key-hydration or profile/balance merge doesn't restart it — and crucially does NOT
+    // reset the view (that yanked you out of Ad Studio etc. ~1s after navigating).
+    const id0 = me.id;
     const tick = () => {
-      fetchNet(me.id).then(setNet).catch(() => {});
-      fetchBalance(me.id).then(setBalance).catch(() => {});
+      fetchNet(id0).then(setNet).catch(() => {});
+      fetchBalance(id0).then(setBalance).catch(() => {});
       void loadCampaigns(); // live funding status
     };
     tick(); const id = setInterval(tick, 3000); return () => clearInterval(id);
-  }, [me]);
+  }, [me?.id]);
 
   useEffect(() => {
     if (!me) return;
@@ -2255,7 +2258,7 @@ function App() {
       .catch(() => setPaymentNotice("Payment received. Waiting for confirmation."));
   }, [me]);
 
-  async function login(u: DemoUser) { const hu = await ensureKey(u); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); setMe(hu); setError(null); }
+  async function login(u: DemoUser) { const hu = await ensureKey(u); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); setMe(hu); setError(null); setView("home"); }
   function logout() { localStorage.removeItem("tempoflow-me"); setMe(null); setAdCampaign(null); setProfileId(null); setView("home"); }
   function openProfile(id: string) { setProfileId(id); setCurrent(null); setAdCampaign(null); setError(null); setView("profile"); }
   function onMeUpdate(u: Partial<DemoUser>) { setMe((m) => { if (!m) return m; const merged = { ...m, ...u }; localStorage.setItem("tempoflow-me", JSON.stringify(merged)); return merged; }); }
