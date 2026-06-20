@@ -2197,7 +2197,7 @@ function App() {
     if (!SERVER_CONFIGURED) return;
     fetchUsers().then(setUsers).catch((e) => setError(e.message));
     refreshFeed();
-    fetchCampaigns().then(setCampaigns).catch(() => {});
+    void loadCampaigns();
     try {
       const saved = localStorage.getItem("tempoflow-me");
       if (saved) {
@@ -2211,6 +2211,13 @@ function App() {
     if (payment === "cancel") setPaymentNotice("Payment canceled. No credit was added.");
   }, []);
   function refreshFeed() { if (SERVER_CONFIGURED) fetchFeed().then(setFeed).catch((e) => setError(e.message)); }
+  // Load campaigns with a sequence guard so a slow/stale fetch (e.g. an in-flight poll
+  // started before you published) can't clobber a newer list and make your ad vanish.
+  const campSeq = useRef(0);
+  const loadCampaigns = async () => {
+    const seq = ++campSeq.current;
+    try { const cs = await fetchCampaigns(); if (seq === campSeq.current) setCampaigns(cs); } catch { /* keep current on error */ }
+  };
 
   useEffect(() => {
     if (!me) return;
@@ -2218,7 +2225,7 @@ function App() {
     const tick = () => {
       fetchNet(me.id).then(setNet).catch(() => {});
       fetchBalance(me.id).then(setBalance).catch(() => {});
-      fetchCampaigns().then(setCampaigns).catch(() => {}); // live funding status
+      void loadCampaigns(); // live funding status
     };
     tick(); const id = setInterval(tick, 3000); return () => clearInterval(id);
   }, [me]);
@@ -2248,7 +2255,7 @@ function App() {
       const ad = await uploadAd(me.id, adTitle.trim(), adTags.split(",").map((t) => t.trim()).filter(Boolean), adFile, 0);
       // Show it in "Your ads" IMMEDIATELY — even if the on-chain escrow below fails, the ad
       // must still appear (previously a funding error left it created but invisible).
-      setCampaigns(await fetchCampaigns());
+      await loadCampaigns();
       const initial = Number(adBudget);
       if (initial > 0) {
         // Trial-credit accounts may not hold enough pathUSD to escrow the budget — top up
@@ -2264,7 +2271,7 @@ function App() {
         } catch (e: any) {
           setError(`Ad published, but the on-chain escrow failed (${e?.message ?? e}). Fund it from "Your ads" below.`);
         }
-        setCampaigns(await fetchCampaigns());
+        await loadCampaigns();
       }
       setAdTitle(""); setAdTags(""); setAdFile(null); setAdBudget("0.20"); setBalance(await fetchBalance(me.id));
     }
@@ -2278,7 +2285,7 @@ function App() {
     try {
       const r = await fundCampaign(me, id, amt);
       setAdTx((m) => ({ ...m, [id]: { kind: "escrow", tx: r.escrowTx, amountUsd: amt } }));
-      setCampaigns(await fetchCampaigns());
+      await loadCampaigns();
       setBalance(await fetchBalance(me.id));
     } catch (e: any) { setError(e?.message ?? String(e)); }
     setFundingAd(null);
@@ -2290,7 +2297,7 @@ function App() {
     try {
       const r = await stopCampaign(me, id);
       setAdTx((m) => ({ ...m, [id]: { kind: "refund", tx: r.refundTx, amountUsd: r.refundedUsd } }));
-      setCampaigns(await fetchCampaigns());
+      await loadCampaigns();
       setBalance(await fetchBalance(me.id));
     } catch (e: any) { setError(e?.message ?? String(e)); }
     setStoppingAd(null);
