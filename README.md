@@ -1,9 +1,14 @@
-# FLOW
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="TempoFlow — your attention to ads pays for your creator feed" width="100%" />
+</p>
+
+# TempoFlow
 
 **A content feed where money flows in real time — _out_ to creators when you watch them,
-_in_ from advertisers when you watch ads.** No subscriptions, no engagement-bait
-algorithm, no ignored-impression ads. Built on **Tempo** via the **Machine Payments
-Protocol (MPP)**.
+_in_ from advertisers when your balance runs low.** You watch free; when your credit
+dips, your agent auto-plays a matching ad to refill you. No subscriptions, no
+engagement-bait algorithm, no ignored-impression ads. Built on **Tempo** via the
+**Machine Payments Protocol (MPP)**.
 
 > _Your attention to ads pays for your creator feed._
 
