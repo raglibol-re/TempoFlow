@@ -431,6 +431,14 @@ textarea.input { resize: vertical; font-family: inherit; }
 .agent-ad .emoji { font-size: 40px; }
 .player-connecting { position: absolute; bottom: 10px; left: 10px; z-index: 4; background: rgba(0,0,0,.72); color: #fff; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 
+/* out-of-funds ad takeover (the agent's ad plays over the blurred creator video) */
+.ov-ad-takeover { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; background: rgba(0,0,0,.5); overflow: hidden; }
+.takeover-ad { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.takeover-copy { position: relative; z-index: 1; background: rgba(0,0,0,.62); border-radius: 14px; padding: 16px 20px; text-align: center; backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.12); }
+/* on-chain receipt link (used in receipts + agent panel) */
+a.tx { color: var(--accent2); font-size: 12px; text-decoration: none; cursor: pointer; }
+a.tx:hover { text-decoration: underline; }
+
 .linkbtn { border: none; background: transparent; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; }
 .linkbtn:hover { color: #fff; }
 

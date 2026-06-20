@@ -632,7 +632,7 @@ const LOW_CAP = 0.012;
  *  it reads what you're into (the clip's tags), auto-picks the funded ad that best
  *  matches, and pays YOU per verified second of attention — settled on-chain. The
  *  self-financing feed, run by a machine: no human chooses the ad, no LLM key needed. */
-function AdAgentPanel({ clip, me, onEarned, active }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; active: boolean }) {
+function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; onAd?: (ad: Campaign | null) => void; active: boolean }) {
   const [ad, setAd] = useState<Campaign | null>(null);
   const [reason, setReason] = useState("reading your interests…");
   const [earned, setEarned] = useState(0);
@@ -648,7 +648,7 @@ function AdAgentPanel({ clip, me, onEarned, active }: { clip: Clip; me: DemoUser
   // The agent's decision: match an ad to this clip's interests.
   useEffect(() => {
     let on = true;
-    matchAd(clip.tags ?? []).then((m) => { if (on) { setAd(m.match); setReason(m.match ? m.reason : "no funded ad is bidding right now"); } });
+    matchAd(clip.tags ?? []).then((m) => { if (on) { setAd(m.match); onAd?.(m.match); setReason(m.match ? m.reason : "no funded ad is bidding right now"); } });
     return () => { on = false; };
   }, [clip.id]);
   useEffect(() => { const f = () => setVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", f); f(); return () => document.removeEventListener("visibilitychange", f); }, []);
@@ -681,6 +681,7 @@ function AdAgentPanel({ clip, me, onEarned, active }: { clip: Clip; me: DemoUser
         <div className="muted" style={{ fontSize: 12 }}>matched <b>{ad.title ?? ad.advertiser}</b> — {reason}</div>
         <div className="bignum in" style={{ fontSize: 26 }}>+ {usd(earned)}</div>
         <div className="muted" style={{ fontSize: 11.5 }}>{!active ? "starts paying once your watch session is live…" : earning ? "paying you per verified second → settled on-chain" : "keep the ad on screen to keep earning"}</div>
+        <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" style={{ marginTop: 6, display: "inline-block" }}>↗ on-chain receipts (your wallet)</a>
       </>) : <div className="muted" style={{ fontSize: 12.5 }}>{reason}</div>}
     </div>
   );
@@ -799,6 +800,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [reason, setReason] = useState<"ended" | "out-of-funds" | null>(null);
   const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
+  const [agentAd, setAgentAd] = useState<Campaign | null>(null); // the ad the agent matched (for the out-of-funds takeover)
   const [summary, setSummary] = useState<CloseSummary | null>(null);
   const [low, setLow] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -811,7 +813,9 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const deposit = low ? LOW_CAP : 0.5;
   const collab = clip.recipients.length > 1;
 
-  useEffect(() => () => { handle.current?.stop().catch(() => {}); }, []);
+  // Auto-start watching on open: the video plays + the creator-payment channel opens
+  // immediately, and the ad agent kicks in once payment is live. No click needed.
+  useEffect(() => { void start(); return () => { handle.current?.stop().catch(() => {}); }; }, []);
   useEffect(() => { void viewClip(clip.id); }, [clip.id]); // count a view when the page opens
   useEffect(() => {
     setPopularity([]);
@@ -853,11 +857,12 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   }, []);
 
   async function start() {
+    if (phase === "opening" || phase === "watching" || handle.current) return; // guard: never open two channels
     setSummary(null); setSpent(0); setSecs(0); setReason(null); capping.current = false; setPhase("opening");
-    // Play INSTANTLY — don't make the viewer wait ~8–15s for the on-chain channel to
-    // open. The video starts now; the payment stream connects in the background and
-    // charging begins as soon as it's ready.
-    video.current?.play().catch(() => {});
+    // Play INSTANTLY — don't make the viewer wait for the on-chain channel to open. The
+    // video starts now; the payment stream connects in the background and charging
+    // begins as soon as it's ready. Try unmuting (autoplay starts it muted).
+    if (video.current) { video.current.muted = false; video.current.play().catch(() => { if (video.current) { video.current.muted = true; video.current.play().catch(() => {}); } }); }
     try {
       handle.current = await watchClip(clip, me,
         (t: Tick) => {
@@ -924,7 +929,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             title={live ? "click to stop" : "click to start"}
           >
             {clip.hasVideo
-              ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline style={{ opacity: phase === "paused" ? 0.4 : 1 }} />
+              ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" autoPlay muted loop playsInline style={{ opacity: reason === "out-of-funds" ? 1 : phase === "paused" ? 0.4 : 1, filter: reason === "out-of-funds" ? "blur(16px) brightness(.45)" : undefined, transition: "filter .35s ease" }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
             <button className="fs-open" onClick={openFullscreen} title="fullscreen" aria-label="Open fullscreen">⛶</button>
             {clip.live && <span className="live-badge player-live">● LIVE</span>}
@@ -941,7 +946,23 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             {streamEnded && <div className="ov">🔴 Stream ended — the creator left the live.</div>}
             {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
             {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
-            {!streamEnded && phase === "paused" && <div className="ov">{reason === "out-of-funds" ? "⛔ Out of credit — top up to keep watching." : "⏸ Paused — payment stopped. Click the video to start again."}</div>}
+            {!streamEnded && phase === "paused" && reason === "out-of-funds" && (
+              <div className="ov ov-ad-takeover">
+                {agentAd?.hasVideo
+                  ? <video src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="takeover-ad" />
+                  : <span className="emoji" style={{ fontSize: 64 }}>{agentAd?.thumb ?? "📣"}</span>}
+                <span className="adtag" style={{ top: 10, left: 10 }}>● AD · agent</span>
+                <div className="takeover-copy">
+                  <div style={{ fontSize: 17, fontWeight: 800 }}>⛔ Out of funds</div>
+                  <div className="muted" style={{ fontSize: 13, maxWidth: 360, margin: "6px auto 0" }}>Your agent is playing a matching ad to earn it back — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Keep watching to refill, or top up.</div>
+                  <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
+                    <button className="btn btn-sm" onClick={() => { setReason(null); void start(); }}>▶ Resume watching</button>
+                    <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {!streamEnded && phase === "paused" && reason !== "out-of-funds" && <div className="ov">⏸ Paused — payment stopped. Click the video to start again.</div>}
           </div>
           <PopularityTimeline
             videoDuration={videoDuration || clip.durationSec}
@@ -990,17 +1011,17 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             const refunded = Math.max(0, deposit - paid);
             return (
               <div className="receipt">
-                <div className="receipt-head">✓ Charged from app balance</div>
+                <div className="receipt-head">✓ Settled on-chain (Tempo)</div>
                 <div className="statline"><span className="k">paid to creator</span><span><b>{usd(paid)}</b>{summary.seconds != null ? ` · ${summary.seconds}s` : ""}</span></div>
                 <div className="statline"><span className="k">deposit refunded</span><span style={{ color: "var(--in)" }}>{usd(refunded)}</span></div>
                 {summary.txHash
-                  ? <div className="tx" title="click to copy full tx hash" onClick={() => copy(summary.txHash!)}>tx {shortHash(summary.txHash)} <span className="copy">⧉ copy</span></div>
-                  : <div className="tx">transaction recorded in your ledger</div>}
+                  ? <a className="tx" href={explorerTxUrl(summary.txHash)} target="_blank" rel="noreferrer" title={summary.txHash}>↗ on-chain receipt · {shortHash(summary.txHash)}</a>
+                  : <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer">↗ view your wallet on the explorer</a>}
               </div>
             );
           })()}
         </div>
-        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} active={phase === "watching" || phase === "paused"} />}
+        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={phase === "watching" || phase === "paused"} />}
         </div>
       </div>
     </div>
