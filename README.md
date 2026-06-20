@@ -18,8 +18,6 @@
   <code>Tempo testnet</code> · <code>pathUSD (TIP-20)</code> · <code>verified on-chain</code> · <code>agent — no API key</code> · <b>⚠️ TESTNET ONLY</b>
 </p>
 
-![money flow demo](docs/assets/flow.gif)
-
 ---
 
 ## The idea in one line
