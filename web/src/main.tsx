@@ -31,6 +31,7 @@ const usd = (n: number) => "$" + nf(n);
 const fmtBal = usd;
 const shortHash = (h: string) => (h.length > 22 ? `${h.slice(0, 12)}…${h.slice(-8)}` : h);
 const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* no clipboard */ } };
+type ViewName = "home" | "earn" | "flow" | "studio" | "campaigns" | "ledger" | "profile" | "watch";
 
 // Theme: dark by default. Applied to <html data-theme> before React renders (no flash).
 type Theme = "dark" | "light";
@@ -813,6 +814,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const player = useRef<HTMLDivElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const capping = useRef(false);
+  const startToken = useRef(0);
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deposit = low ? LOW_CAP : 0.5;
   const collab = clip.recipients.length > 1;
@@ -862,30 +864,48 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
 
   async function start() {
     if (phase === "opening" || phase === "watching" || handle.current) return; // guard: never open two channels
+    const token = ++startToken.current;
     setSummary(null); setSpent(0); setSecs(0); setReason(null); capping.current = false; setPhase("opening");
     // Play INSTANTLY — don't make the viewer wait for the on-chain channel to open. The
     // video starts now; the payment stream connects in the background and charging
     // begins as soon as it's ready. Try unmuting (autoplay starts it muted).
     if (video.current) { video.current.muted = false; video.current.play().catch(() => { if (video.current) { video.current.muted = true; video.current.play().catch(() => {}); } }); }
     try {
-      handle.current = await watchClip(clip, me,
+      const nextHandle = await watchClip(clip, me,
         (t: Tick) => {
+          if (token !== startToken.current) return;
           setPhase("watching"); setSpent(t.spentUsd); setSecs(t.second); video.current?.play().catch(() => {});
           setPopularity((prev) => incrementPopularity(prev, t.second - 1));
           if (low && t.spentUsd >= LOW_CAP && !capping.current) { capping.current = true; closeOut("out-of-funds"); }
         },
-        (r) => { if (!capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
-    } catch (e: any) { onError(e?.message ?? String(e)); setPhase("idle"); }
+        (r) => { if (token === startToken.current && !capping.current) { setReason(r); setPhase("paused"); video.current?.pause(); } });
+      if (token !== startToken.current) {
+        await nextHandle.stop().catch(() => {});
+        return;
+      }
+      handle.current = nextHandle;
+    } catch (e: any) {
+      if (token === startToken.current) { onError(e?.message ?? String(e)); setPhase("idle"); }
+    }
   }
   async function closeOut(why: "ended" | "out-of-funds") {
+    startToken.current++;
     if (!handle.current) return;
     setReason(why); video.current?.pause(); setPhase("closing");
     try { setSummary((await handle.current.stop()) ?? null); } catch (e: any) { onError(e?.message ?? String(e)); }
     handle.current = null; setPhase("paused"); onSettled();
   }
   function togglePlayback() {
-    if (phase === "opening" || phase === "closing") return;
+    if (phase === "closing") return;
+    if (phase === "opening") {
+      startToken.current++;
+      video.current?.pause();
+      setPhase("idle");
+      setReason(null);
+      return;
+    }
     if (phase === "watching") { void closeOut("ended"); return; }
+    if (reason !== "out-of-funds") setReason(null);
     void start();
   }
   function revealFsControls() {
@@ -930,7 +950,16 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             className={"player click-player" + (fullscreen ? " player-fullscreen" : "")}
             onClick={togglePlayback}
             onMouseMove={revealFsControls}
-            title={live ? "click to stop" : "click to start"}
+            title={live ? "Click to pause" : "Click to play"}
+            role="button"
+            aria-label={live ? "Pause video" : "Play video"}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                togglePlayback();
+              }
+            }}
           >
             {clip.hasVideo
               ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" autoPlay muted loop playsInline style={{ opacity: reason === "out-of-funds" ? 1 : phase === "paused" ? 0.4 : 1, filter: reason === "out-of-funds" ? "blur(16px) brightness(.45)" : undefined, transition: "filter .35s ease" }} />
@@ -948,7 +977,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               </div>
             )}
             {streamEnded && <div className="ov">🔴 Stream ended — the creator left the live.</div>}
-            {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
+            {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video to play — you pay ${usd(price)}/sec to the creator`}</div>}
             {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
             {!streamEnded && phase === "paused" && reason === "out-of-funds" && (
               <div className="ov ov-ad-takeover">
@@ -960,13 +989,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
                   <div style={{ fontSize: 17, fontWeight: 800 }}>⛔ Out of funds</div>
                   <div className="muted" style={{ fontSize: 13, maxWidth: 360, margin: "6px auto 0" }}>Your agent is playing a matching ad to earn it back — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Keep watching to refill, or top up.</div>
                   <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
-                    <button className="btn btn-sm" onClick={() => { setReason(null); void start(); }}>▶ Resume watching</button>
-                    <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setReason(null); void start(); }}>▶ Resume watching</button>
+                    <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); onTopup(); }}>＋ Add funds</button>
                   </div>
                 </div>
               </div>
             )}
-            {!streamEnded && phase === "paused" && reason !== "out-of-funds" && <div className="ov">⏸ Paused — payment stopped. Click the video to start again.</div>}
+            {!streamEnded && phase === "paused" && reason !== "out-of-funds" && <div className="ov">⏸ Paused — payment stopped. Click the video to continue.</div>}
           </div>
           <PopularityTimeline
             videoDuration={videoDuration || clip.durationSec}
@@ -1005,9 +1034,9 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
             {phase === "idle" || phase === "paused"
-              ? <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "paused" ? "▶ Resume" : "▶ Watch"}</button>
+              ? <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "paused" ? "▶ Continue" : "▶ Watch"}</button>
               : <button className="btn" disabled style={{ flex: 1 }}>{phase === "opening" ? "opening…" : "watching…"}</button>}
-            <button className="btn btn-ghost" onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Stop</button>
+            <button className="btn btn-ghost" onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Pause</button>
           </div>
           <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Demo: limited funds (stops after ~6s)</label>
           {summary && (() => {
@@ -1887,6 +1916,10 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
     setSettlement({ paid: out, earned: inUsd, refund, txHash });
     setPhase("done");
   }
+  function toggleFlowPlayback() {
+    if (phase === "idle" || phase === "done") { void start(); return; }
+    if (phase === "starting" || phase === "running") void stop();
+  }
 
   return (
     <div className="page">
@@ -1908,7 +1941,11 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
       <div className="flow-stage">
         {/* creator video — money OUT */}
         <div className="flow-pane">
-          <div className="player">
+          <div
+            className="player click-player"
+            onClick={toggleFlowPlayback}
+            title={phase === "idle" || phase === "done" ? "click to start" : phase === "settling" ? "settling" : "click to stop"}
+          >
             {clip.hasVideo ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" loop playsInline muted={false} /> : <span className="emoji">{clip.thumb ?? "🎬"}</span>}
             <span className="badge" style={{ background: "var(--out)" }}>↘ paying creator</span>
           </div>
@@ -1994,7 +2031,7 @@ function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [net, setNet] = useState<NetSnapshot | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
-  const [view, setView] = useState("home");
+  const [view, setView] = useState<ViewName>("home");
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const toggleTheme = () => setTheme((t) => { const next: Theme = t === "dark" ? "light" : "dark"; applyTheme(next); return next; });
   const [current, setCurrent] = useState<Clip | null>(null);
@@ -2148,13 +2185,15 @@ function App() {
   const myAds = campaigns.filter((c) => c.ownerId === me.id);
   const activeAd = adCampaign ? campaigns.find((c) => c.id === adCampaign) ?? null : null;
   // Every logged-in wallet is full-access: watch, create + upload, advertise, earn.
-  const nav: [string, string][] = [
-    ["home", "Watch"],
-    ["studio", "Creator Studio"],
-    ["campaigns", "Advertise"],
+  const nav: [ViewName, string][] = [
+    ["home", "Home"],
+    ["earn", "Ads"],
+    ["flow", "Flow"],
+    ["studio", "Studio"],
+    ["campaigns", "Ad Studio"],
     ["ledger", "Ledger"],
   ];
-  const go = (v: string) => { setView(v); setCurrent(null); setSearch(""); };
+  const go = (v: ViewName) => { setView(v); setCurrent(null); setSearch(""); };
   const userById = (uid: string) => users.find((u) => u.id === uid);
 
   return (
