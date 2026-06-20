@@ -18,11 +18,12 @@ real-time money-flow UI with demo reset/fallbacks. **TESTNET ONLY — never real
 
 | When you… | Money flows… | How |
 |---|---|---|
-| **Watch a creator** | **out**: you → creator, per second | Watchtime, not subscriptions. Scroll away = instant stop + refund. |
-| **Watch an ad** | **in**: advertiser → you, per second | Ads pay *you* — but **only for proven attention** (layered proof, below). |
+| **Watch a creator** | **out**: you → creator, per second | Watchtime, not subscriptions — you pay only while you watch, and stop anytime. |
+| **Run low on credit** | **in**: advertiser → you, per second | Your agent auto-plays a *matching* ad to refill you — paid **only for proven attention** (layered proof, below). |
 
-The attention you spend on ads finances the creators you watch — a potentially
-self-sustaining feed.
+You watch free; your balance drains to the creators you watch, and when it runs low your
+**agent earns it back from a matched ad** — an alternating drain → refill loop that nets
+≈ 0 over time. A potentially self-sustaining feed, balanced by a machine (no API key).
 
 ## Proving attention (anti-fraud)
 
@@ -54,15 +55,15 @@ trustlessly** — applied to a different surface. See [ADR-011](docs/06-decision
 
 | Feature | What it does | The MPP angle |
 |---|---|---|
-| **Live tip boost** | While watching a creator, stream an extra `$X/sec` tip on top of watchtime (or quick one-tap tips). | Per-second value transfer, layered on the existing watch stream. |
-| **Attention auction** | Advertisers bid for your attention; the **highest bid wins** the slot but you're paid the **second-highest price** (Vickrey). | A real, transparent price-discovery market on attention — honest bidding is optimal. |
+| **Autonomous ad agent** | When your credit runs low while watching, a deterministic agent (no API key) reads your interests, picks the best-matching **funded** ad, plays it full-screen to refill you, then auto-resumes your video. | Settles the advertiser → viewer payout on-chain per proven second; pure tag-overlap + budget policy, no LLM. |
+| **Live tip boost** | While watching a creator, stream an extra `$X/sec` tip on top of watchtime (or quick one-tap tips). | Per-second value transfer, layered on the existing watch stream — settled on-chain. |
 | **Ask a creator's AI** | Chat a creator's AI persona, billed **per generated token**, revenue split to the creator. | `unitType: "token"` — the machine-payments story (real Claude API streaming, falls back to a canned answer offline). |
 | **Crowdfund goals** | Back a creator's funding goal; pledges are **escrowed** and only captured if the goal is reached, else **auto-refunded** at the deadline. | Trustless Kickstarter on the escrow + refund primitive. |
 | **Advertiser escrow + refund** | An advertiser **escrows real pathUSD on-chain** into the platform vault to fund an ad; the ad pays viewers per proven second from that escrow; when the advertiser hits **Stop**, the **unspent remainder is refunded on-chain** to their wallet (and the budget is capped at what was actually spent). | Pay-as-watched ad budgets on the escrow + refund primitive — every deposit, payout, and refund is a real on-chain tx, linked to the block explorer in the Ad Studio. |
-| **Go live** | Creators stream live; every viewer pays per second and a **shared real-time meter** shows concurrent watchers, combined `$/sec`, and 👏 cheers. The stream is **live only while the creator is present** — when they leave it ends automatically (and disappears from the feed), so viewers never pay for an absent host. | Many simultaneous per-second payers into one aggregated audience, gated on host presence. |
+| **Go live (on camera)** | Creators stream their **webcam** live; viewers on other accounts see the real camera feed and pay per second, while the host watches a live **income meter** (watchers, combined `$/sec`, 👏 cheers). Live only while the host is present — it auto-ends when they leave. | Many per-second payers into one aggregated audience, gated on host presence. |
 
-Find them in the app: **Earn → ⚡ Live attention auction**; the **watch page** (tip boost; live
-meter on live streams); **Studio → 🔴 Go live**; and any **creator profile** (Ask-AI box + funding goal).
+Find them in the app: the **watch page** (auto ad-refill + tip boost); **Studio → 🔴 Go live** (on camera);
+**Ad Studio** (fund ads on-chain); the **Ledger** (transparent 3% margin); and any **creator profile** (Ask-AI box + funding goal).
 
 ## Why only on Tempo
 
@@ -84,12 +85,15 @@ Open **http://localhost:5173** (a multi-user, YouTube/Twitch-style dashboard):
 - **Account switcher** (top-right avatars): be any of the demo users — people (watch + post)
   or companies (run ads). Each has its own funded Tempo wallet; you pay/earn as them.
 - **Home**: a multi-channel feed — **Watch** any clip → money streams **out** to *that*
-  creator per second; **Skip** → settle on-chain + refund. Collab clips show a 70/20/10 split.
-- **Studio**: post your own clip → it joins the feed and earns to your wallet.
-- **Earn**: watch an ad → an advertiser pays **you** per second of attention; **Look away**,
-  background the tab, scroll the ad off-screen, or ignore the random "tap to prove you're
-  watching" prompt and the payment pauses (three-layer attention proof — see above).
-- **Company** accounts: a campaigns view; viewers who watch your ad get paid by you.
+  creator per second; when your credit runs low your **agent plays a matching ad** full-screen
+  to refill you, then auto-resumes. Stop anytime (you're only charged for what you watch).
+  Collab clips show a 70/20/10 split.
+- **Studio**: post a clip → it joins the feed and earns to your wallet, or **🔴 Go live on
+  camera** → viewers on other accounts see your webcam and pay you per second.
+- **Ad Studio**: fund an ad on-chain — your funded ad is what the agent serves to viewers,
+  paying them per **proven** second (look away / background the tab / ignore the random
+  "tap to prove you're watching" prompt → payment pauses; three-layer attention proof above).
+- **Ledger**: the transparent glass ledger — every payment and the **3% platform margin**, on-chain.
 
 > If the page ever shows a stale error after a code change, hard-refresh (Ctrl+Shift+R) —
 > the dev server hot-reloads and old tabs can hold a dead connection. The app now reports
@@ -127,8 +131,9 @@ Two money directions, both over MPP sessions on Tempo testnet. See
 ## What works (Definition of Done)
 
 - ✅ Both money directions live over MPP sessions on Tempo testnet
-- ✅ Skip / attention-loss stops payment instantly and refunds unused deposit
-- ✅ Viewer net balance rises from ads, falls from creators — live
+- ✅ Stopping or losing attention halts payment instantly — you're only charged per second actually watched
+- ✅ When credit runs low, the agent's matched ad refills you on-chain, then watching auto-resumes (drain → refill, net ≈ 0)
+- ✅ Live streaming on camera: viewers on other accounts see the host's real webcam and pay per second; the host sees a live income meter
 - ✅ Three-layer attention proof (passive signals + random tap challenge + session-bound heartbeats) prevents paying for ignored or scripted ads
 - ✅ Per-second-native features: live tip boost, second-price attention auction, pay-per-token creator AI, escrowed crowdfund goals, and live streaming with a shared audience meter
 - ✅ Advertiser escrow + refund: ad budgets are real pathUSD escrowed on-chain, spent per proven second, and the unspent remainder is refunded on-chain on Stop (verified: fund/payout/refund all settle on Tempo)
