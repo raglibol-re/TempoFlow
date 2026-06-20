@@ -627,7 +627,8 @@ function LiveChat({ clipId, me }: { clipId: string; me: DemoUser }) {
   );
 }
 
-const LOW_CAP = 0.012;
+const WATCH_WINDOW_S = 14; // demo refill loop: watch this long before your credit "runs low"
+const AD_WINDOW_S = 6;     // …then the refill ad plays this long before auto-resuming
 
 /** Autonomous interest-matching ad agent (DETERMINISTIC — no API key). While you watch,
  *  it reads what you're into (the clip's tags), auto-picks the funded ad that best
@@ -816,19 +817,19 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [bufferedTime, setBufferedTime] = useState(0);
   const [popularity, setPopularity] = useState<SecondPopularity[]>([]);
   const [serverOut, setServerOut] = useState(false);   // server: your on-chain balance < price/sec
-  const [demoOut, setDemoOut] = useState(false);       // demo cap reached → refill episode (with hysteresis)
-  const [capDisabled, setCapDisabled] = useState(false); // you chose to keep watching past the demo cap
+  const [demoOut, setDemoOut] = useState(false);       // refill episode active (timer-driven loop)
   const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
   const [agentAd, setAgentAd] = useState<Campaign | null>(null); // the ad the agent matched (for the out-of-funds takeover)
   const [summary, setSummary] = useState<CloseSummary | null>(null);
-  const [low, setLow] = useState(false);
+  const [low, setLow] = useState(true); // refill demo loop ON by default so the agent is always visibly working
   const [fullscreen, setFullscreen] = useState(false);
   const [fsControls, setFsControls] = useState(true);
   const handle = useRef<WatchHandle | null>(null);
   const player = useRef<HTMLDivElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
-  const pauseRef = useRef(false); // freeze charging during the demo cap so the agent can catch up
+  const pauseRef = useRef(false); // freeze creator charging while the agent's ad refills you
+  const skipRef = useRef(false);  // "Skip ▶" → end the current refill ad immediately
   const startToken = useRef(0);
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collab = clip.recipients.length > 1;
@@ -885,16 +886,25 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
     };
   }, []);
 
-  // Demo "limited funds" refill loop, with HYSTERESIS so the ad doesn't flicker on/off:
-  // ENTER the out-of-funds refill episode once your net spend crosses the cap, and only
-  // EXIT once the agent has refilled you back to net ≥ 0. Result: watch a while → ad steps
-  // in to refill → resume → repeat. (No demo mode → this stays off; real out-of-funds is
-  // driven by serverOut instead.)
+  // Refill loop — DETERMINISTIC & timer-driven so it can NEVER get stuck: you watch for
+  // WATCH_WINDOW_S, then your credit "runs low" and the agent's matching ad takes over to
+  // refill you for AD_WINDOW_S, then it auto-resumes — repeat. The real on-chain money
+  // flows underneath (creator charged while watching; agent pays you while the ad runs);
+  // this just drives the UI timing reliably instead of racing the on-chain settle lag.
+  // "Skip ▶" (skipRef) ends the current ad immediately. Toggle off to just watch.
   useEffect(() => {
-    if (!low || capDisabled || phase !== "watching") { if (demoOut) setDemoOut(false); return; }
-    if (!demoOut && spent - earned >= LOW_CAP) setDemoOut(true);
-    else if (demoOut && earned >= spent) setDemoOut(false);
-  }, [low, capDisabled, phase, spent, earned, demoOut]);
+    if (!low || phase !== "watching") { setDemoOut(false); return; }
+    let watchSecs = 0, adSecs = 0;
+    setDemoOut(false);
+    const id = setInterval(() => {
+      if (skipRef.current) { skipRef.current = false; watchSecs = 0; adSecs = 0; setDemoOut(false); return; }
+      setDemoOut((prev) => {
+        if (!prev) { watchSecs += 1; if (watchSecs >= WATCH_WINDOW_S) { adSecs = 0; return true; } return false; }
+        adSecs += 1; if (adSecs >= AD_WINDOW_S) { watchSecs = 0; return false; } return true;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [low, phase]);
 
   // Drive the creator video off the funds state: pause + blur when out of funds (the
   // agent's ad takes over the player), and resume the instant funds recover. Fully
@@ -1050,7 +1060,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               ? <button className="btn btn-ghost" onClick={() => void stopWatch()} style={{ flex: 1 }}>{phase === "opening" ? "opening…" : "■ Stop watching"}</button>
               : <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "stopped" ? "▶ Watch again" : "▶ Watch"}</button>}
           </div>
-          <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Demo: limited funds (triggers the out-of-funds → ad refill loop)</label>
+          <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Auto-refill demo — agent plays a matching ad when your credit runs low (uncheck to just watch)</label>
           {summary && (() => {
             const paid = summary.spentUsd ?? spent;
             return (
@@ -1081,7 +1091,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               <div className="adpop-title">⛔ Out of funds — your agent took over</div>
               <div className="adpop-sub">Playing a matching ad to refill you — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Watching resumes automatically the moment you’re back in credit.</div>
               <div className="adpop-actions">
-                {demoOut && <button className="btn btn-sm" onClick={() => setCapDisabled(true)}>▶ Keep watching</button>}
+                <button className="btn btn-sm" onClick={() => { skipRef.current = true; setDemoOut(false); }}>▶ Skip ad</button>
                 <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => void stopWatch()}>✕ Stop</button>
               </div>
