@@ -2,6 +2,9 @@
   <img src="docs/assets/banner.svg" alt="TempoFlow — your attention to ads pays for your creator feed" width="100%" />
 </p>
 
+
+
+
 <h1 align="center">TempoFlow</h1>
 
 <p align="center">
