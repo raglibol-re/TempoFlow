@@ -440,7 +440,7 @@ export async function uploadClip(as: string, title: string, tags: string[], file
 export const setClipPrice = (clipId: string, as: string, pricePerSec: string) =>
   jpost(`/clips/${clipId}/price`, { as, pricePerSec }, "update price").then((j) => j.clip as Clip);
 
-export interface Tick { second: number; spentUsd: number; creator: string; clipId: string }
+export interface Tick { second: number; spentUsd: number; creator: string; clipId: string; outOfFunds: boolean }
 /** Result of settling (closing) a payment channel — straight from the on-chain
  *  receipt. `refundUsd` is computed by the caller against the deposit it showed. */
 export interface CloseSummary { spentUsd?: number; seconds?: number; txHash?: string; channelId?: string }
@@ -463,23 +463,33 @@ const rawToUsd = (raw?: string) => (raw == null ? undefined : Number(raw) / 10 *
 export const fetchWatchReceipts = (as: string) =>
   jget(`/watch/receipts?as=${encodeURIComponent(as)}`, "load watch receipts").then((j) => (j.receipts ?? []) as AdReceipt[]).catch(() => [] as AdReceipt[]);
 
+export interface WatchOpts {
+  /** When this returns true the browser tells the server NOT to charge this tick
+   *  (used by the demo "limited funds" freeze). Server keeps the session alive. */
+  shouldPause?: () => boolean;
+}
+
 export async function watchClip(
-  clip: Clip, me: DemoUser, onTick: (t: Tick) => void,
-  onEnd: (reason: "ended" | "out-of-funds") => void, _maxDeposit = "0.5",
+  clip: Clip, me: DemoUser, onTick: (t: Tick) => void, opts: WatchOpts = {},
 ): Promise<WatchHandle> {
-  // SERVER-DRIVEN on-chain payment: each second the browser pings /watch-tick; the
-  // server charges the viewer for the creator and batch-settles on-chain (signing from
-  // the viewer's stored testnet key). Reliable — no in-browser MPP channel that can
-  // stall. The video plays independently; this just meters the money.
+  // SERVER-DRIVEN on-chain payment, CONTINUOUS: each second the browser pings
+  // /watch-tick; the server charges the viewer for the creator and batch-settles
+  // on-chain (signing from the viewer's stored testnet key). When the viewer is out
+  // of funds the tick returns outOfFunds=true and DOESN'T charge — but the loop keeps
+  // running, so the moment funds return (the ad agent earned, or a top-up) charging
+  // resumes automatically. The video plays independently; this just meters the money.
   let sec = 0; let stopped = false; let lastSpent = 0;
   const tick = async () => {
     if (stopped) return;
     const visible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+    const pause = !!opts.shouldPause?.();
     try {
-      const r = await jpost("/watch-tick", { as: me.id, clipId: clip.id, visible, playing: true }, "watch tick");
+      const r = await jpost("/watch-tick", { as: me.id, clipId: clip.id, visible, playing: true, pause }, "watch tick");
       if (stopped) return;
-      if (r?.outOfFunds) { stopped = true; clearInterval(id); onEnd("out-of-funds"); return; }
-      if (!r?.paused) { sec++; if (typeof r?.spentUsd === "number") lastSpent = r.spentUsd; onTick({ second: sec, spentUsd: lastSpent, creator: clip.creator, clipId: clip.id }); }
+      const outOfFunds = !!r?.outOfFunds;
+      // Only advance the paid-second counter when the server actually charged.
+      if (!r?.paused && !outOfFunds) { sec++; if (typeof r?.spentUsd === "number") lastSpent = r.spentUsd; }
+      onTick({ second: sec, spentUsd: lastSpent, creator: clip.creator, clipId: clip.id, outOfFunds });
     } catch { /* transient network blip — keep ticking */ }
   };
   void tick();

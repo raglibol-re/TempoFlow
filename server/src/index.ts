@@ -855,6 +855,7 @@ app.post("/watch-tick", async (c) => {
   if (!clip || !viewer) return c.json({ ok: false }, 400);
   if (viewer.id === clip.ownerId) return c.json({ ok: true, free: true, spentUsd: 0 }); // creators preview free
   if (b?.visible === false) return c.json({ ok: true, paused: true });
+  if (b?.pause === true) return c.json({ ok: true, paused: true }); // client freeze (demo limited-funds) — keep session alive, don't charge
   // Out of funds → the UI blurs the video + the agent's ad takes over (earn it back).
   if (await viewerBalanceCached(viewer.id, viewer.address) < Number(clip.pricePerSec)) return c.json({ ok: true, outOfFunds: true });
   const spentUsd = accrueWatch(clipId, viewerId);
