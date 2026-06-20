@@ -278,6 +278,31 @@ app.post("/demo/fund", async (c) => {
   return c.json({ ok: true, tx, balance });
 });
 
+// ── Admin: drain over-funded seed accounts to a realistic balance ───────────────
+// The seed wallets were funded once from the testnet faucet (tempo_fundAddress), which
+// dumps ~1M pathUSD — unrealistic. This transfers each account's EXCESS back to the
+// operator treasury, leaving ~targetUsd each. Best-effort per user. TESTNET ONLY.
+app.post("/admin/drain", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const target = Math.max(0, Number(b?.targetUsd) || 25);
+  const results: any[] = [];
+  for (const u of users) {
+    if (!u.key) { results.push({ user: u.id, skipped: "no key" }); continue; }
+    if (u.address.toLowerCase() === operatorAddress.toLowerCase()) { results.push({ user: u.id, skipped: "operator (treasury)" }); continue; }
+    let bal: number;
+    try { bal = await pathUsdBalance(u.address); } catch { results.push({ user: u.id, skipped: "balance read failed" }); continue; }
+    const excess = +(bal - target).toFixed(6);
+    if (excess <= 1) { results.push({ user: u.id, balance: bal, drained: 0 }); continue; }
+    try {
+      const wallet = createWalletClient({ account: privateKeyToAccount(u.key as `0x${string}`), chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+      const tx = await wallet.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [operatorAddress, parseUnits(excess.toFixed(6), TOKEN_DECIMALS)], chain: tempoTestnet as any });
+      balCache.delete(u.id); // bust the cached balance so the UI reflects the drain
+      results.push({ user: u.id, was: bal, drained: excess, tx });
+    } catch (e) { results.push({ user: u.id, balance: bal, error: (e as Error).message }); }
+  }
+  return c.json({ ok: true, target, results });
+});
+
 app.post("/api/stripe/create-topup-checkout-session", async (c) => {
   try {
     const b = await c.req.json().catch(() => ({}));
