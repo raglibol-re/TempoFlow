@@ -459,58 +459,38 @@ const rawToUsd = (raw?: string) => (raw == null ? undefined : Number(raw) / 10 *
 /** Watch a clip as `me`, paying its creator per second. onTick each paid second;
  *  onEnd when the stream ends (funding stopped / closed). `maxDeposit` caps how
  *  much the channel can fund — a small value makes payment stop early (demo). */
+/** Recent on-chain watch-payment receipts (you → creator) for receipt links. */
+export const fetchWatchReceipts = (as: string) =>
+  jget(`/watch/receipts?as=${encodeURIComponent(as)}`, "load watch receipts").then((j) => (j.receipts ?? []) as AdReceipt[]).catch(() => [] as AdReceipt[]);
+
 export async function watchClip(
   clip: Clip, me: DemoUser, onTick: (t: Tick) => void,
-  onEnd: (reason: "ended" | "out-of-funds") => void, maxDeposit = "0.5",
+  onEnd: (reason: "ended" | "out-of-funds") => void, _maxDeposit = "0.5",
 ): Promise<WatchHandle> {
-  // REAL on-chain payment: open an MPP payment channel from the viewer's wallet and
-  // stream pathUSD to the creator per second. Closing settles on Tempo and refunds
-  // the unspent deposit. (No off-chain ledger — the chain IS the money.)
-  const mgr = manager(me, maxDeposit);
-  let stream: AsyncIterable<string>;
-  try {
-    stream = await mgr.sse(`${SERVER_URL}/watch/${clip.id}?as=${me.id}`);
-  } catch (e: any) {
-    throw new Error(`open payment channel for "${clip.title}" failed: ${e?.message ?? e}`);
-  }
-  const drained = (async () => {
+  // SERVER-DRIVEN on-chain payment: each second the browser pings /watch-tick; the
+  // server charges the viewer for the creator and batch-settles on-chain (signing from
+  // the viewer's stored testnet key). Reliable — no in-browser MPP channel that can
+  // stall. The video plays independently; this just meters the money.
+  let sec = 0; let stopped = false; let lastSpent = 0;
+  const tick = async () => {
+    if (stopped) return;
+    const visible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
     try {
-      for await (const data of stream) {
-        try { const t = JSON.parse(data) as Tick; if (t?.second) onTick(t); } catch { /* keep-alive */ }
-      }
-      onEnd("ended");
-    } catch {
-      onEnd("out-of-funds"); // channel ran dry / closed
-    }
-  })();
+      const r = await jpost("/watch-tick", { as: me.id, clipId: clip.id, visible, playing: true }, "watch tick");
+      if (stopped) return;
+      if (r?.outOfFunds) { stopped = true; clearInterval(id); onEnd("out-of-funds"); return; }
+      if (!r?.paused) { sec++; if (typeof r?.spentUsd === "number") lastSpent = r.spentUsd; onTick({ second: sec, spentUsd: lastSpent, creator: clip.creator, clipId: clip.id }); }
+    } catch { /* transient network blip — keep ticking */ }
+  };
+  void tick();
+  const id = setInterval(tick, 1000);
   return {
     async stop() {
-      // Tell the server to stop charging (best-effort — it's only a flag).
-      await fetch(`${SERVER_URL}/watch/${clip.id}/stop`, { method: "POST" }).catch(() => {});
-      await drained;
-      let receipt: any;
-      try {
-        receipt = await mgr.close(); // settle highest voucher on-chain + refund unused deposit
-      } catch (e: any) {
-        const msg = String(e?.shortMessage ?? e?.message ?? e);
-        // A missing/expired channel means there's nothing left to settle: the per-second
-        // vouchers already paid the creator, and any unspent deposit auto-refunds when the
-        // channel lapses (or the server's in-memory store was reset). This is NOT a user
-        // error — return a best-effort summary instead of a scary toast.
-        // Missing/expired channel, or a voucher/spent mismatch on close: the per-second
-        // vouchers already paid the creator and any unspent deposit auto-refunds — not a
-        // user error. Return a best-effort summary instead of a scary toast.
-        if (/channel not found|not found|410|402|already|expired|voucher|verification|no .*channel/i.test(msg)) {
-          return { spentUsd: undefined, seconds: undefined, txHash: undefined, channelId: undefined };
-        }
-        throw new Error(`settle/refund failed: ${msg}`);
-      }
-      return {
-        spentUsd: rawToUsd(receipt?.spent),
-        seconds: typeof receipt?.units === "number" ? receipt.units : undefined,
-        txHash: receipt?.txHash,
-        channelId: receipt?.channelId ?? receipt?.reference,
-      };
+      stopped = true; clearInterval(id);
+      await jpost("/watch-tick/stop", { as: me.id, clipId: clip.id }, "stop watch").catch(() => {});
+      let txHash: string | undefined;
+      try { const rec = await fetchWatchReceipts(me.id); txHash = rec[0]?.txHash; } catch { /* ignore */ }
+      return { spentUsd: lastSpent, seconds: sec, txHash, channelId: undefined };
     },
   };
 }

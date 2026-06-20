@@ -13,7 +13,8 @@ import "./env.js"; // must be first — loads .env before config/shared
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { generate } from "mppx/discovery";
-import { parseUnits } from "viem";
+import { parseUnits, createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
@@ -789,6 +790,84 @@ setInterval(() => { void settleEarnings(); }, 7000).unref?.();
 
 /** Recent on-chain ad-payout receipts for a viewer (for receipt links in the UI). */
 app.get("/agent/receipts", (c) => c.json({ receipts: adReceipts.get(c.req.query("as") ?? "") ?? [] }));
+
+// ── Server-driven WATCH payout (viewer → creator) ────────────────────────────
+// The browser just plays the video and pings /watch-tick each second; the server
+// charges the viewer for that second (records live so the counter moves) and batch-
+// settles on-chain by signing a transfer from the viewer's stored testnet key
+// (custodial demo). Mirrors the ad payout → both directions are reliable + on-chain,
+// no in-browser MPP channel that can stall.
+interface WatchPay { clipId: string; viewerId: string; creatorAddr: `0x${string}`; viewerKey: `0x${string}`; viewerName: string; creatorName: string; owedRaw: bigint; settledRaw: bigint; lastTs: number }
+const watchPays = new Map<string, WatchPay>();
+const watchReceipts = new Map<string, { txHash: string; amountUsd: number; ts: number }[]>();
+const wKey = (c: string, v: string) => `${c}:${v}`;
+
+function accrueWatch(clipId: string, viewerId: string): number {
+  const clip = getClip(clipId); const viewer = getUser(viewerId);
+  if (!clip || !viewer || !viewer.key) return 0;
+  const k = wKey(clipId, viewerId); const now = Date.now();
+  let w = watchPays.get(k);
+  if (!w) { watchPays.set(k, { clipId, viewerId, creatorAddr: clip.recipients[0]!.recipient, viewerKey: viewer.key, viewerName: viewer.name, creatorName: clip.creator, owedRaw: 0n, settledRaw: 0n, lastTs: now }); return 0; }
+  const elapsed = Math.min(2, (now - w.lastTs) / 1000); w.lastTs = now;
+  const amt = +(Number(clip.pricePerSec) * elapsed).toFixed(6);
+  if (amt > 0) {
+    ledger.record({ fromAddr: viewer.address, toAddr: w.creatorAddr, fromLabel: viewer.name, toLabel: clip.creator, amount: amt, contentId: clipId });
+    w.owedRaw += parseUnits(amt.toFixed(6), TOKEN_DECIMALS);
+  }
+  return Number(w.owedRaw) / 10 ** TOKEN_DECIMALS;
+}
+
+let settlingW = false;
+async function settleWatch(minUsd = 0.003) {
+  if (settlingW) return; settlingW = true;
+  const min = parseUnits(minUsd.toFixed(6), TOKEN_DECIMALS);
+  try {
+    for (const w of watchPays.values()) {
+      const delta = w.owedRaw - w.settledRaw;
+      if (delta <= 0n || delta < min) continue;
+      w.settledRaw = w.owedRaw;
+      try {
+        const wallet = createWalletClient({ account: privateKeyToAccount(w.viewerKey), chain: tempoTestnet as any, transport: http(TEMPO_RPC_URL) });
+        const tx = await wallet.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [w.creatorAddr, delta], chain: tempoTestnet as any });
+        const list = watchReceipts.get(w.viewerId) ?? []; list.unshift({ txHash: tx as string, amountUsd: Number(delta) / 10 ** TOKEN_DECIMALS, ts: Date.now() });
+        watchReceipts.set(w.viewerId, list.slice(0, 25));
+        console.log(`[watch-pay] ${w.viewerName} → ${w.creatorName} +${Number(delta) / 10 ** TOKEN_DECIMALS} pathUSD tx ${tx}`);
+      } catch (err) { w.settledRaw -= delta; console.error("[watch-pay] settle failed:", (err as Error).message); }
+    }
+  } finally { settlingW = false; }
+}
+setInterval(() => { void settleWatch(); }, 7000).unref?.();
+
+// Cheap, cached on-chain balance (so we don't hit the RPC every tick).
+const balCache = new Map<string, { bal: number; ts: number }>();
+async function viewerBalanceCached(id: string, addr: `0x${string}`): Promise<number> {
+  const cached = balCache.get(id);
+  if (cached && Date.now() - cached.ts < 4000) return cached.bal;
+  const bal = await pathUsdBalance(addr).catch(() => cached?.bal ?? Number.MAX_SAFE_INTEGER);
+  balCache.set(id, { bal, ts: Date.now() });
+  return bal;
+}
+/** One watched second → charge the viewer for the creator. Returns the live spent. */
+app.post("/watch-tick", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const clipId = String(b?.clipId ?? ""); const viewerId = String(b?.as ?? "");
+  const clip = getClip(clipId); const viewer = getUser(viewerId);
+  if (!clip || !viewer) return c.json({ ok: false }, 400);
+  if (viewer.id === clip.ownerId) return c.json({ ok: true, free: true, spentUsd: 0 }); // creators preview free
+  if (b?.visible === false) return c.json({ ok: true, paused: true });
+  // Out of funds → the UI blurs the video + the agent's ad takes over (earn it back).
+  if (await viewerBalanceCached(viewer.id, viewer.address) < Number(clip.pricePerSec)) return c.json({ ok: true, outOfFunds: true });
+  const spentUsd = accrueWatch(clipId, viewerId);
+  return c.json({ ok: true, spentUsd });
+});
+app.post("/watch-tick/stop", async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const k = wKey(String(b?.clipId ?? ""), String(b?.as ?? ""));
+  await settleWatch(0);
+  watchPays.delete(k);
+  return c.json({ ok: true });
+});
+app.get("/watch/receipts", (c) => c.json({ receipts: watchReceipts.get(c.req.query("as") ?? "") ?? [] }));
 
 app.post("/attention/session", async (c) => {
   const b = await c.req.json().catch(() => ({}));

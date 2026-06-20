@@ -30,7 +30,7 @@ export const TEMPO_RPC_URL =
 /** Tempo testnet block-explorer base URL (testnet "moderato"). Used to link real
  *  on-chain receipts (tx + address). Override via TEMPO_EXPLORER_URL if it differs. */
 export const TEMPO_EXPLORER_URL =
-  env("TEMPO_EXPLORER_URL") ?? "https://explorer.moderato.tempo.xyz";
+  env("TEMPO_EXPLORER_URL") ?? "https://explore.tempo.xyz";
 
 /** The Tempo app / project home — linked from the wallet dashboard so users can open
  *  Tempo directly. Override via TEMPO_APP_URL. */
