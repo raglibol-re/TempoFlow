@@ -917,6 +917,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const pauseRef = useRef(false); // freeze creator charging while the agent's ad refills you
   const skipRef = useRef(false);  // "Skip ▶" → end the current refill ad immediately
   const adReadyRef = useRef(false); // true once the agent has matched a fundable ad to show
+  const adpopVideo = useRef<HTMLVideoElement | null>(null); // the out-of-funds takeover ad (for sound)
   const spentRef = useRef(0);     // live spent/earned for the net≤0 refill loop (avoids stale closures)
   const earnedRef = useRef(0);
   const startToken = useRef(0);
@@ -1008,6 +1009,15 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
     if ((phase === "watching" || phase === "opening") && !outOfFunds && !streamEnded) v.play().catch(() => {});
     else v.pause();
   }, [outOfFunds, phase, streamEnded]);
+
+  // SOUND-ONLY: when the takeover ad shows, best-effort UNMUTE it (the creator video is
+  // already paused, and the page has audio permission from the watch click). It autoplays
+  // muted regardless, so if the browser blocks unmute the ad still plays — no functional change.
+  useEffect(() => {
+    if (!outOfFunds) return;
+    const t = setTimeout(() => { const v = adpopVideo.current; if (v) { try { v.muted = false; v.volume = 1; void v.play().catch(() => {}); } catch { /* keep muted */ } } }, 200);
+    return () => clearTimeout(t);
+  }, [outOfFunds, agentAd?.id]);
 
   async function start() {
     if (phase === "opening" || phase === "watching" || handle.current) return; // guard: never open two sessions
@@ -1179,7 +1189,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
         <div className="adpop-backdrop">
           <div className="adpop">
             {agentAd?.hasVideo
-              ? <video src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="adpop-video" />
+              ? <video ref={adpopVideo} src={videoSrc(agentAd.id)} autoPlay loop muted playsInline className="adpop-video" />
               : <div className="adpop-emoji">{agentAd?.thumb ?? "📣"}</div>}
             <span className="adpop-tag">● AD · your agent</span>
             <div className="adpop-copy">
