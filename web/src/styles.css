@@ -98,6 +98,7 @@ code { background: #000; padding: 1px 5px; border-radius: 5px; font-size: 0.85em
 .player { position: relative; aspect-ratio: 16/9; border-radius: var(--radius); overflow: hidden; background: #000; display: grid; place-items: center; }
 .click-player { cursor: pointer; }
 .click-player video { pointer-events: none; }
+.click-player:focus-visible { outline: 3px solid rgba(0,113,227,.32); outline-offset: 4px; }
 .player video { width: 100%; height: 100%; object-fit: contain; background:#000; }
 .player .emoji { font-size: 90px; }
 .player .ov { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; background: rgba(0,0,0,.6); font-weight: 600; }
@@ -1088,7 +1089,15 @@ html[data-theme="dark"] .urow,
 html[data-theme="dark"] .topup-choice,
 html[data-theme="dark"] .adcard,
 html[data-theme="dark"] .login-acct,
-html[data-theme="dark"] .tipbox {
+html[data-theme="dark"] .tipbox,
+html[data-theme="dark"] .flow-counter,
+html[data-theme="dark"] .flow-net,
+html[data-theme="dark"] .concept,
+html[data-theme="dark"] .concept-step,
+html[data-theme="dark"] .ledger,
+html[data-theme="dark"] .comment-input,
+html[data-theme="dark"] .comment,
+html[data-theme="dark"] .emoji-opt {
   background: rgba(28,28,30,.84);
   color: var(--text);
   border-color: rgba(255,255,255,.12);
@@ -1119,6 +1128,55 @@ html[data-theme="dark"] .login-acct-avatar {
   background: rgba(255,255,255,.07);
   border-color: rgba(255,255,255,.1);
   color: #d7d7dc;
+}
+html[data-theme="dark"] .section-title,
+html[data-theme="dark"] .vtitle,
+html[data-theme="dark"] .w-title,
+html[data-theme="dark"] .flow-net-num,
+html[data-theme="dark"] .flow-counter-num,
+html[data-theme="dark"] .concept-title,
+html[data-theme="dark"] .ledger-k,
+html[data-theme="dark"] .ledger-v,
+html[data-theme="dark"] .acct-name,
+html[data-theme="dark"] .search-copy b,
+html[data-theme="dark"] .login-panel-head h2,
+html[data-theme="dark"] .modal-head h3,
+html[data-theme="dark"] .tip-head,
+html[data-theme="dark"] .auction-head,
+html[data-theme="dark"] .goal-head,
+html[data-theme="dark"] .ask-head {
+  color: var(--text);
+}
+html[data-theme="dark"] .panel h3,
+html[data-theme="dark"] .flow-counter-label,
+html[data-theme="dark"] .statline .k,
+html[data-theme="dark"] .ledger-row,
+html[data-theme="dark"] .login-panel-head p,
+html[data-theme="dark"] .acct-row .k {
+  color: var(--muted);
+}
+html[data-theme="dark"] .flow-net {
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(28,28,30,.84));
+  border-color: rgba(10,132,255,.42);
+  box-shadow: 0 16px 42px rgba(0,0,0,.28);
+}
+html[data-theme="dark"] .concept {
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(28,28,30,.82));
+}
+html[data-theme="dark"] .agent-overlay,
+html[data-theme="dark"] .role-chip2,
+html[data-theme="dark"] .supporter-badge {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.12);
+  color: #d7d7dc;
+}
+html[data-theme="dark"] .linkbtn:hover,
+html[data-theme="dark"] .acct-row .tx:hover {
+  color: #fff;
+}
+html[data-theme="dark"] .topup-choice,
+html[data-theme="dark"] .emoji-opt {
+  color: var(--text);
 }
 html[data-theme="dark"] .vcard:hover { background: rgba(255,255,255,.055); }
 html[data-theme="dark"] .vthumb,

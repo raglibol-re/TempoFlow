@@ -901,6 +901,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
       return;
     }
     if (phase === "watching") { void closeOut("ended"); return; }
+    if (reason !== "out-of-funds") setReason(null);
     void start();
   }
   function revealFsControls() {
@@ -945,7 +946,16 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             className={"player click-player" + (fullscreen ? " player-fullscreen" : "")}
             onClick={togglePlayback}
             onMouseMove={revealFsControls}
-            title={live ? "click to stop" : "click to start"}
+            title={live ? "Click to pause" : "Click to play"}
+            role="button"
+            aria-label={live ? "Pause video" : "Play video"}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                togglePlayback();
+              }
+            }}
           >
             {clip.hasVideo
               ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" autoPlay muted loop playsInline style={{ opacity: reason === "out-of-funds" ? 1 : phase === "paused" ? 0.4 : 1, filter: reason === "out-of-funds" ? "blur(16px) brightness(.45)" : undefined, transition: "filter .35s ease" }} />
@@ -963,7 +973,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               </div>
             )}
             {streamEnded && <div className="ov">🔴 Stream ended — the creator left the live.</div>}
-            {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video or press “Watch” — you pay ${usd(price)}/sec to the creator`}</div>}
+            {!streamEnded && phase === "idle" && <div className="ov">{broke ? "⛔ You’re out of credit — add funds to watch this." : `▶ Click the video to play — you pay ${usd(price)}/sec to the creator`}</div>}
             {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
             {!streamEnded && phase === "paused" && reason === "out-of-funds" && (
               <div className="ov ov-ad-takeover">
@@ -975,13 +985,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
                   <div style={{ fontSize: 17, fontWeight: 800 }}>⛔ Out of funds</div>
                   <div className="muted" style={{ fontSize: 13, maxWidth: 360, margin: "6px auto 0" }}>Your agent is playing a matching ad to earn it back — <b style={{ color: "var(--in)" }}>+{usd(earned)}</b> earned. Keep watching to refill, or top up.</div>
                   <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: "center" }}>
-                    <button className="btn btn-sm" onClick={() => { setReason(null); void start(); }}>▶ Resume watching</button>
-                    <button className="btn btn-ghost btn-sm" onClick={onTopup}>＋ Add funds</button>
+                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setReason(null); void start(); }}>▶ Resume watching</button>
+                    <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); onTopup(); }}>＋ Add funds</button>
                   </div>
                 </div>
               </div>
             )}
-            {!streamEnded && phase === "paused" && reason !== "out-of-funds" && <div className="ov">⏸ Paused — payment stopped. Click the video to start again.</div>}
+            {!streamEnded && phase === "paused" && reason !== "out-of-funds" && <div className="ov">⏸ Paused — payment stopped. Click the video to continue.</div>}
           </div>
           <PopularityTimeline
             videoDuration={videoDuration || clip.durationSec}
@@ -1020,9 +1030,9 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
             {phase === "idle" || phase === "paused"
-              ? <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "paused" ? "▶ Resume" : "▶ Watch"}</button>
+              ? <button className="btn" onClick={start} style={{ flex: 1 }}>{phase === "paused" ? "▶ Continue" : "▶ Watch"}</button>
               : <button className="btn" disabled style={{ flex: 1 }}>{phase === "opening" ? "opening…" : "watching…"}</button>}
-            <button className="btn btn-ghost" onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Stop</button>
+            <button className="btn btn-ghost" onClick={() => closeOut("ended")} disabled={phase !== "watching"}>Pause</button>
           </div>
           <label className="toggle"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> Demo: limited funds (stops after ~6s)</label>
           {summary && (() => {
