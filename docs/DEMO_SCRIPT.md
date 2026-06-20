@@ -21,9 +21,13 @@ mit autonomen Maschinen-Zahlungen. ⚠️ Nur Tempo-Testnet.
 *dich* bezahlt, nicht die Plattform. Und keine dieser Zahlungen löst ein Mensch aus."
 
 **0:10 — Live-Saldo öffnen.** Nav **⚡ Live Saldo** → **▶ Start flow session**.
-- **Links** tropft Geld **raus an den Creator** (pro Sekunde Watchtime).
-- **Rechts** tropft Werbe-Geld **rein zu dir** (pro verifizierter Sekunde).
-- **Mitte** der große **Netto-Saldo pendelt um Null**. Sub-Cent sichtbar (€0.000X/s).
+- **Phase 1 — du schaust:** Geld tropft **raus an den Creator** (pro Sekunde Watchtime),
+  dein **Saldo sinkt**. Sub-Cent sichtbar (€0.000X/s).
+- **Phase 2 — Saldo wird knapp:** das Video **pausiert**, dein Agent spielt automatisch
+  eine passende Ad → Werbe-Geld tropft **rein zu dir** (pro verifizierter Sekunde), der
+  **Saldo füllt sich auf**. Danach läuft das Video weiter — zurück zu Phase 1.
+- **Mitte** der große **Netto-Saldo landet über die Zeit bei ~Null** (abwechselnd raus,
+  dann rein — nicht gleichzeitig).
 - Kernsatz: **„20 Minuten geschaut, netto ~0 € bezahlt."**
 
 **0:50 — Die Maschinen-Zahlung zeigen (§5/§A).** Auf das Overlay am rechten Zähler

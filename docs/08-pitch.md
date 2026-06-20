@@ -18,9 +18,10 @@ FLOW makes money flow per second and **visible**, in two directions:
   session-bound heartbeats) means you can't farm it by looking away or scripting. No
   attention, no payment.
 
-**Net effect:** your ad-attention finances the creators you actually want to watch — a
-potentially self-sustaining feed. We proved it: autonomous agents ran the loop and the viewer
-came out **net positive** (paid $0.03 to creators, earned $0.06 from ads).
+**How it loops:** you watch for free and your balance drains per second to the creator; when it
+runs low the video pauses and your agent auto-plays an ad that refills you, then watching resumes
+— draining and refilling alternate, netting **≈ 0** over time. We proved it: autonomous agents ran
+the loop and the viewer came out **net positive** (paid $0.03 to creators, earned $0.06 from ads).
 
 ## Live demo
 The money-flow moment (see [07-demo-script.md](07-demo-script.md)): out to a creator with

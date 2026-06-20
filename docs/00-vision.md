@@ -18,10 +18,12 @@ FLOW inverts the flow of money and makes it visible in real time:
 | **Watch a creator** | **out**: you → creator, **per second** | Watchtime, not subscriptions. Scroll away = instant stop. |
 | **Watch an ad** | **in**: advertiser → you, **per second** | Ads pay *you* for genuine attention. |
 
-**Net effect:** the attention you give to ads finances the creators you actually want
-to watch. A potentially self-sustaining feed:
+**How it loops:** you watch for free and your balance **drains per second** to the creator.
+When your balance runs **low**, the video pauses and your agent auto-plays a matching ad that
+**earns to refill** you — then watching resumes. Balance alternates between draining (while
+you watch) and refilling (while an ad plays); over time the net is **≈ 0**:
 
-> _Your attention to ads pays for your creator feed._
+> _Your attention to ads refills the balance you spend on your creator feed._
 
 ### Target audience
 

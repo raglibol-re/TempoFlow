@@ -27,9 +27,11 @@ On-Chain-Pfad ist `/watch/:id` (Direction A).
   **Settings → Export key** abrufbar.
 - ✅ **Social-Layer**: View-Counts, Likes, Kommentare (pro Clip), **Live-Chat** in
   Streams. SQLite-backed (`clip_likes`/`clip_comments`/`chat_messages` + `clips.views`).
-- ✅ **§2 Live-Saldo-Screen** (`FlowSession`, Nav „⚡ Live Saldo"): ein Screen, links
-  Geld raus an Creator, rechts Geld rein vom Ad, Mitte großer **Netto-Saldo um Null**,
-  Sub-Cent-Granularität, Settlement-Moment mit Refund + Tx-Link.
+- ✅ **§2 Live-Saldo-Screen** (`FlowSession`, Nav „⚡ Live Saldo"): ein Screen, der den
+  Wechsel-Loop zeigt — Phase 1: Geld raus an Creator (Saldo sinkt beim Schauen); Phase 2:
+  bei knappem Saldo pausiert das Video und der Agent spielt eine Ad → Geld rein (Saldo
+  füllt sich auf). Mitte großer **Netto-Saldo über die Zeit um Null** (abwechselnd, nicht
+  gleichzeitig), Sub-Cent-Granularität, Settlement-Moment mit Refund + Tx-Link.
 - ✅ **§5 agentische Schicht** (Overlay, kein eigener Screen): die IN-Seite wird vom
   autonomen Advertiser-Agent getrieben; Overlay „N agents bidding · clearing €X/s".
 - ✅ **§A Dynamic Attention Pricing**: der IN-Preis ist der **Clearing-Preis** einer

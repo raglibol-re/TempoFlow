@@ -175,8 +175,9 @@ manager/channel per clip**. (2) advertiser would hang when attention stopped →
 - Advertiser: discovered the attention endpoint, paid the viewer $0.004/sec ×15 = $0.06,
   stopped at budget, on-chain txHash `0x5bdf…`.
 - **Net: out $0.03 to creators, in $0.06 from the advertiser → net +$0.03.** The
-  self-sustaining loop ("ad attention finances the feed") runs autonomously, both agents
-  respecting budgets and closing channels cleanly. JSONL audit trails in `agent/logs/`.
+  sequential drain-then-refill loop (watch → balance drains to creator → runs low → agent
+  plays an ad → refill → resume) runs autonomously, both agents respecting budgets and
+  closing channels cleanly. JSONL audit trails in `agent/logs/`.
 
 **Phase 4 done.** Next: Phase 5 polish (money-flow animation, receipts view) + 07/08/README.
 
