@@ -4,6 +4,8 @@
 
 # TempoFlow
 
+
+
 **A content feed where money flows in real time — _out_ to creators when you watch them,
 _in_ from advertisers when your balance runs low.** You watch free; when your credit
 dips, your agent auto-plays a matching ad to refill you. No subscriptions, no
