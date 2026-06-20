@@ -633,7 +633,7 @@ const LOW_CAP = 0.012;
  *  it reads what you're into (the clip's tags), auto-picks the funded ad that best
  *  matches, and pays YOU per verified second of attention — settled on-chain. The
  *  self-financing feed, run by a machine: no human chooses the ad, no LLM key needed. */
-function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; onAd?: (ad: Campaign | null) => void; active: boolean }) {
+function AdAgentPanel({ clip, me, onEarned, onAd, active, outOfFunds }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; onAd?: (ad: Campaign | null) => void; active: boolean; outOfFunds: boolean }) {
   const [ad, setAd] = useState<Campaign | null>(null);
   const [reason, setReason] = useState("reading your interests…");
   const [earned, setEarned] = useState(0);
@@ -643,6 +643,7 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: De
   const box = useRef<HTMLDivElement | null>(null);
   const token = useRef<string | undefined>(undefined);
   const baseline = useRef<number | null>(null);
+  const adVideo = useRef<HTMLVideoElement | null>(null);
   const visRef = useRef(visible); visRef.current = visible;
   const scrRef = useRef(onScreen); scrRef.current = onScreen;
   // Earn whenever the agent is active and the tab is in the foreground. We deliberately
@@ -659,37 +660,45 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active }: { clip: Clip; me: De
   }, [clip.id]);
   useEffect(() => { const f = () => setVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", f); f(); return () => document.removeEventListener("visibilitychange", f); }, []);
   useEffect(() => { const el = box.current; if (!el || typeof IntersectionObserver === "undefined") return; const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.25), { threshold: [0, 0.25, 1] }); io.observe(el); return () => io.disconnect(); }, [ad?.id]);
-  // The agent autonomously pays you: open attention session, prove attention, the
-  // advertiser agent settles per second; poll on-chain earnings. Gated on `active`
-  // (the watch payment is flowing) so the two MPP channels open one-after-another
-  // instead of fighting over the rate-limited RPC.
+  // EARNINGS POLL — runs the whole time you're watching so the +earned counter is
+  // CUMULATIVE across refill episodes (the refill loop needs a monotonic total to know
+  // when you're back in the black). This only READS on-chain earnings; never pays.
   useEffect(() => {
-    if (!ad || !active) return;
-    let alive = true; baseline.current = null;
-    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
-    // Heartbeats ARE the payout trigger: when the server verifies attention, the operator
-    // pays this viewer per second (server-driven — no spawned process). We just poll the
-    // on-chain earnings + the latest settlement receipt.
-    const beat = () => { void sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current, playing: true, onScreen: true }); };
-    beat(); const beatId = setInterval(beat, 1000);
-    const netId = setInterval(async () => {
+    let alive = true;
+    const poll = async () => {
       try { const n = await fetchNet(me.id); if (baseline.current == null) baseline.current = n.inUsd; const e = +(n.inUsd - (baseline.current ?? 0)).toFixed(6); if (alive) { setEarned(e); onEarned(e); } } catch { /* keep last */ }
       try { const r = await fetchAdReceipts(me.id); if (alive && r[0]) setLastTx(r[0].txHash); } catch { /* keep last */ }
-    }, 1500);
-    return () => { alive = false; clearInterval(beatId); clearInterval(netId); stopAd(ad.id, me.id); };
+    };
+    void poll(); const id = setInterval(poll, 1500);
+    return () => { alive = false; clearInterval(id); };
+  }, [me.id]);
+  // PAYMENT — ONLY while active (= you're out of funds). The ad doesn't earn alongside the
+  // video; it steps in when your balance runs low. Open the attention session + heartbeat,
+  // and each verified second the operator pays you on-chain to refill you. Otherwise the ad
+  // just sits in standby (no session, no payout) — nothing plays next to the content.
+  useEffect(() => {
+    if (!ad || !active) return;
+    let alive = true;
+    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
+    const beat = () => { void sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current, playing: true, onScreen: true }); };
+    beat(); const beatId = setInterval(beat, 1000);
+    return () => { alive = false; clearInterval(beatId); stopAd(ad.id, me.id); };
   }, [ad?.id, me.id, active]);
+  // The sidebar ad is a paused STANDBY preview during normal watching; it only plays while
+  // you're out of funds (mirroring the takeover that fills the player to refill you).
+  useEffect(() => { const v = adVideo.current; if (!v) return; if (outOfFunds) v.play().catch(() => {}); else v.pause(); }, [outOfFunds, ad?.id]);
 
   return (
     <div className="panel agent-panel" ref={box}>
       <div className="agent-head">🤖 Your ad agent <span className="muted" style={{ fontWeight: 600, fontSize: 11 }}>· autonomous · no API key</span></div>
       {ad ? (<>
         <div className="agent-ad">
-          {ad.hasVideo ? <video src={videoSrc(ad.id)} preload="metadata" autoPlay loop muted playsInline /> : <span className="emoji" style={{ fontSize: 40 }}>{ad.thumb ?? "📣"}</span>}
-          <span className="adtag">● AD</span>
+          {ad.hasVideo ? <video ref={adVideo} src={videoSrc(ad.id)} preload="metadata" loop muted playsInline /> : <span className="emoji" style={{ fontSize: 40 }}>{ad.thumb ?? "📣"}</span>}
+          <span className="adtag">{outOfFunds ? "● AD · playing" : "● AD · standby"}</span>
         </div>
         <div className="muted" style={{ fontSize: 12 }}>matched <b>{ad.title ?? ad.advertiser}</b> — {reason}</div>
         <div className="bignum in" style={{ fontSize: 26 }}>+ {usd(earned)}</div>
-        <div className="muted" style={{ fontSize: 11.5 }}>{!active ? "starts paying once your watch session is live…" : earning ? "paying you per verified second → settled on-chain" : "keep the ad on screen to keep earning"}</div>
+        <div className="muted" style={{ fontSize: 11.5 }}>{earning ? "💸 refilling you — paying per verified second → settled on-chain" : "🟢 standby — plays automatically to refill you when your balance runs low"}</div>
         <a className="tx" href={lastTx ? explorerTxUrl(lastTx) : explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" style={{ marginTop: 6, display: "inline-block" }}>{lastTx ? `↗ on-chain receipt · ${lastTx.slice(0, 10)}…` : "↗ on-chain receipts (your wallet)"}</a>
       </>) : <div className="muted" style={{ fontSize: 12.5 }}>{reason}</div>}
     </div>
@@ -807,6 +816,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const [bufferedTime, setBufferedTime] = useState(0);
   const [popularity, setPopularity] = useState<SecondPopularity[]>([]);
   const [serverOut, setServerOut] = useState(false);   // server: your on-chain balance < price/sec
+  const [demoOut, setDemoOut] = useState(false);       // demo cap reached → refill episode (with hysteresis)
   const [capDisabled, setCapDisabled] = useState(false); // you chose to keep watching past the demo cap
   const [streamEnded, setStreamEnded] = useState(false); // live host left
   const [earned, setEarned] = useState(0); // earned by the autonomous ad agent this session
@@ -823,13 +833,12 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const hideFsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collab = clip.recipients.length > 1;
   const price = Number(clip.pricePerSec);
-  // Out of funds = the demo cap is hit (net spend over the cap, and you didn't override it)
-  // OR the server says your real balance ran below the per-second price. While out of funds
-  // we DON'T stop — the video pauses + blurs, the agent's ad takes over and earns it back,
-  // and the moment the balance recovers the video resumes on its own.
-  const demoOut = low && !capDisabled && spent - earned >= LOW_CAP;
+  // Out of funds = a demo refill episode is active OR the server says your real balance ran
+  // below the per-second price. The ad does NOT play alongside the video — you watch and your
+  // balance drains; when it runs low this flips on, the video pauses + blurs, the agent's ad
+  // takes over and refills you, then it flips back off and watching resumes on its own.
   const outOfFunds = (demoOut || serverOut) && phase === "watching";
-  pauseRef.current = demoOut; // only the demo cap freezes the on-chain charging
+  pauseRef.current = demoOut; // freeze the on-chain charging while the agent refills you
   const live = phase === "watching";
   const broke = balance != null && balance < price; // not enough real pathUSD to even start
 
@@ -875,6 +884,17 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
       if (hideFsTimer.current) clearTimeout(hideFsTimer.current);
     };
   }, []);
+
+  // Demo "limited funds" refill loop, with HYSTERESIS so the ad doesn't flicker on/off:
+  // ENTER the out-of-funds refill episode once your net spend crosses the cap, and only
+  // EXIT once the agent has refilled you back to net ≥ 0. Result: watch a while → ad steps
+  // in to refill → resume → repeat. (No demo mode → this stays off; real out-of-funds is
+  // driven by serverOut instead.)
+  useEffect(() => {
+    if (!low || capDisabled || phase !== "watching") { if (demoOut) setDemoOut(false); return; }
+    if (!demoOut && spent - earned >= LOW_CAP) setDemoOut(true);
+    else if (demoOut && earned >= spent) setDemoOut(false);
+  }, [low, capDisabled, phase, spent, earned, demoOut]);
 
   // Drive the creator video off the funds state: pause + blur when out of funds (the
   // agent's ad takes over the player), and resume the instant funds recover. Fully
@@ -1029,16 +1049,17 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
           <div className="paystream">
             <div className="paystream-row">
               <span className="paystream-label out">▼ to creator <span className="muted">{usd(Number(clip.pricePerSec))}/s</span></span>
-              <span className={"bignum out paystream-num" + (live ? " pulsing" : "")}>− {usd(spent)}</span>
+              <span className={"bignum out paystream-num" + (live && !outOfFunds ? " pulsing" : "")}>− {usd(spent)}</span>
             </div>
-            <MoneyFlow dir="out" active={live} />
-            {!clip.live && <>
+            <MoneyFlow dir="out" active={live && !outOfFunds} />
+            {!clip.live && (outOfFunds || earned > 0) && <>
               <div className="paystream-row" style={{ marginTop: 10 }}>
-                <span className="paystream-label in">▲ from ads · agent</span>
-                <span className={"bignum in paystream-num" + (live && earned > 0 ? " pulsing" : "")}>+ {usd(earned)}</span>
+                <span className="paystream-label in">▲ ad refill · agent</span>
+                <span className={"bignum in paystream-num" + (outOfFunds ? " pulsing" : "")}>+ {usd(earned)}</span>
               </div>
-              <MoneyFlow dir="in" active={live && earned > 0} />
+              <MoneyFlow dir="in" active={outOfFunds} />
             </>}
+            {!clip.live && !outOfFunds && earned === 0 && <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>🤖 Free to watch — if your balance runs low, your agent auto-plays a matching ad to refill you.</div>}
           </div>
           <TipBoost me={me} clip={clip} active={live} onTipped={onSettled} />
           <div className="row">
@@ -1061,7 +1082,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             );
           })()}
         </div>
-        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={phase === "watching"} />}
+        {!clip.live && <AdAgentPanel clip={clip} me={me} onEarned={setEarned} onAd={setAgentAd} active={outOfFunds} outOfFunds={outOfFunds} />}
         </div>
       </div>
     </div>
@@ -2005,22 +2026,22 @@ function ConceptHero({ onTry }: { onTry: () => void }) {
   return (
     <div className="concept">
       <div className="concept-title">Watching that <span style={{ color: "var(--in)" }}>pays for itself</span></div>
-      <div className="muted concept-sub">Money flows both ways in real time, on-chain — no subscription, no blackbox middleman.</div>
+      <div className="muted concept-sub">You watch free. When your balance runs low, your agent plays a matching ad to refill you — on-chain, no subscription, no blackbox middleman.</div>
       <div className="concept-steps">
         <div className="concept-step">
           <div className="concept-ico" style={{ color: "var(--out)" }}>▼</div>
           <b>You watch → you pay</b>
-          <span className="muted">creators are paid <b>per second</b> you watch — sub-cent, on-chain (≈ $0.0003/s)</span>
+          <span className="muted">creators are paid <b>per second</b> from your balance — sub-cent, on-chain (≈ $0.0003/s)</span>
         </div>
         <div className="concept-step">
           <div className="concept-ico" style={{ color: "var(--in)" }}>▲</div>
-          <b>Ads pay you</b>
-          <span className="muted">earn <b>per verified second</b> of attention — priced live by autonomous advertiser agents</span>
+          <b>Run low? Ads refill you</b>
+          <span className="muted">your agent auto-plays a <b>matching</b> ad and you earn <b>per verified second</b> to top back up</span>
         </div>
         <div className="concept-step">
           <div className="concept-ico">⚖</div>
-          <b>Net ≈ €0</b>
-          <span className="muted">“20 min watched, ~€0 net.” Every cent is traceable in the open ledger</span>
+          <b>Net ≈ €0 over time</b>
+          <span className="muted">drain while watching, refill on an ad — they alternate; every cent traceable in the open ledger</span>
         </div>
       </div>
       <div className="concept-cta">
