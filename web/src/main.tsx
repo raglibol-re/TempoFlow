@@ -1007,13 +1007,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    // The video plays ONLY while money is flowing to the creator (the per-second charge is
-    // landing) — "opening" gets a brief grace so playback starts instantly. The moment the
-    // charge stops (out of funds, paused, tab hidden) the video stops, ad or no ad.
-    const moneyFlowing = phase === "opening" || (phase === "watching" && paying);
-    if (moneyFlowing && !streamEnded) v.play().catch(() => {});
+    // The video stops ONLY when the wallet is genuinely out of funds (real on-chain balance
+    // < price/sec). As long as the wallet has funds it keeps playing — including during the
+    // simulated demo refill (the wallet isn't actually empty then). serverOut reflects the
+    // real balance check from the server.
+    if ((phase === "opening" || phase === "watching") && !serverOut && !streamEnded) v.play().catch(() => {});
     else v.pause();
-  }, [paying, phase, streamEnded]);
+  }, [serverOut, phase, streamEnded]);
 
   // SOUND-ONLY: when the takeover ad shows, best-effort UNMUTE it (the creator video is
   // already paused, and the page has audio permission from the watch click). It autoplays
