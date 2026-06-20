@@ -916,6 +916,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const video = useRef<HTMLVideoElement | null>(null);
   const pauseRef = useRef(false); // freeze creator charging while the agent's ad refills you
   const skipRef = useRef(false);  // "Skip ▶" → end the current refill ad immediately
+  const adReadyRef = useRef(false); // true once the agent has matched a fundable ad to show
   const spentRef = useRef(0);     // live spent/earned for the net≤0 refill loop (avoids stale closures)
   const earnedRef = useRef(0);
   const startToken = useRef(0);
@@ -929,6 +930,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
   const outOfFunds = (demoOut || serverOut) && phase === "watching";
   pauseRef.current = demoOut; // freeze the on-chain charging while the agent refills you
   spentRef.current = spent; earnedRef.current = earned; // keep the refill-loop refs live
+  adReadyRef.current = !!agentAd; // only run the refill loop when the agent actually has an ad to show
   const live = phase === "watching";
   const broke = balance != null && balance < price; // not enough real pathUSD to even start
 
@@ -988,7 +990,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
       if (skipRef.current) { skipRef.current = false; adSecs = 0; setDemoOut(false); return; }
       const sp = spentRef.current, ea = earnedRef.current;
       setDemoOut((prev) => {
-        if (!prev) { if (sp - ea >= LOW_CAP) { adSecs = 0; return true; } return false; } // ran low → refill
+        if (!prev) { if (sp - ea >= LOW_CAP && adReadyRef.current) { adSecs = 0; return true; } return false; } // ran low + have an ad → refill
         adSecs += 1;
         if (ea >= sp || adSecs >= MAX_AD_S) return false; // broke even (net 0) or anti-stuck cap → resume
         return true;
