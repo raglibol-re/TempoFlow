@@ -206,6 +206,9 @@ export const cheerLive = (id: string) => jpost(`/live/${id}/cheer`, {}, "cheer")
 export const fetchLiveStats = (id: string) => jget(`/live/${id}/stats`, "live stats") as Promise<LiveStats>;
 /** Host presence pulse — keeps the creator's own stream alive while they're in it. */
 export const liveHostBeat = (id: string, as: string) => jpost(`/live/${id}/host-beat`, { as }, "host beat").catch(() => ({ live: false }));
+/** Live camera frame relay: the host pushes webcam snapshots; viewers poll the latest. */
+export const pushLiveFrame = (id: string, frame: string) => jpost(`/live/${id}/frame`, { frame }, "push frame").catch(() => ({ ok: false }));
+export const fetchLiveFrame = (id: string) => jget(`/live/${id}/frame`, "live frame").then((j) => (j.frame as string | null) ?? null).catch(() => null);
 /** Best-effort end-stream on tab close (survives unload where fetch won't). */
 export function endLiveBeacon(id: string, as: string) {
   try { navigator.sendBeacon(`${SERVER_URL}/live/${id}/stop`, new Blob([JSON.stringify({ as })], { type: "application/json" })); } catch { /* ignore */ }

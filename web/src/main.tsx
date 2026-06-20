@@ -17,7 +17,7 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, pushLiveFrame, fetchLiveFrame, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -353,7 +353,7 @@ function TipBoost({ me, clip, active, onTipped }: { me: DemoUser; clip: Clip; ac
 }
 
 // ───────────────────────── live meter + cheer (Feature 5) ─────────────────
-function LiveMeter({ clipId, onEnded }: { clipId: string; onEnded?: () => void }) {
+function LiveMeter({ clipId, onEnded, asHost }: { clipId: string; onEnded?: () => void; asHost?: boolean }) {
   const [stats, setStats] = useState<LiveStats | null>(null);
   const [applause, setApplause] = useState(0);
   const endedFired = useRef(false);
@@ -367,14 +367,41 @@ function LiveMeter({ clipId, onEnded }: { clipId: string; onEnded?: () => void }
     tick(); const id = setInterval(tick, 1500); return () => { on = false; clearInterval(id); };
   }, [clipId]);
   const cheer = async () => { setApplause((a) => a + 1); await cheerLive(clipId); };
+  const perSec = stats?.perSecUsd ?? 0, total = stats?.totalUsd ?? 0;
   return (
     <div className="livemeter">
       <div className="live-row"><span className="live-badge">● LIVE</span><span><b>{stats?.viewers ?? 0}</b> watching now</span></div>
-      <div className="statline"><span className="k">combined</span><span style={{ color: "var(--in)" }}>{usd(stats?.perSecUsd ?? 0)}/sec → creator</span></div>
-      <div className="statline"><span className="k">this stream</span><span>{usd(stats?.totalUsd ?? 0)}</span></div>
+      {asHost ? (
+        <div className="paystream" style={{ marginTop: 10 }}>
+          <div className="paystream-row">
+            <span className="paystream-label in">▲ your income · {usd(perSec)}/s</span>
+            <span className={"bignum in paystream-num" + (perSec > 0 ? " pulsing" : "")}>+ {usd(total)}</span>
+          </div>
+          <MoneyFlow dir="in" active={perSec > 0} />
+          <div className="muted" style={{ fontSize: 11.5 }}>{perSec > 0 ? "viewers are paying you per second → settled on-chain" : "earning starts the moment a viewer tunes in"}</div>
+        </div>
+      ) : (<>
+        <div className="statline"><span className="k">combined</span><span style={{ color: "var(--in)" }}>{usd(perSec)}/sec → creator</span></div>
+        <div className="statline"><span className="k">this stream</span><span>{usd(total)}</span></div>
+      </>)}
       <button className="btn btn-ghost btn-sm cheer-btn" onClick={cheer}>👏 Cheer · {applause}</button>
     </div>
   );
+}
+
+/** Viewer-side live video: polls the host's webcam frame relay (~3 fps) and shows it.
+ *  This is what makes a live stream show the ACTUAL host camera to other accounts,
+ *  instead of a generic placeholder video. */
+function LiveFrameImg({ clipId, blurred }: { clipId: string; blurred: boolean }) {
+  const [frame, setFrame] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    const tick = async () => { const f = await fetchLiveFrame(clipId); if (on) setFrame(f); };
+    void tick(); const id = setInterval(tick, 340);
+    return () => { on = false; clearInterval(id); };
+  }, [clipId]);
+  if (!frame) return <span className="player-connecting">📡 connecting to the host’s camera…</span>;
+  return <img src={frame} alt="live stream" style={{ width: "100%", height: "100%", objectFit: "cover", filter: blurred ? "blur(16px) brightness(.45)" : undefined, transition: "filter .35s ease" }} />;
 }
 
 /** The creator's own LIVE view. The stream stays live only while the host is on this
@@ -416,6 +443,20 @@ function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser;
     })();
     return () => { cancelled = true; if (stream) stream.getTracks().forEach((t) => t.stop()); };
   }, []);
+  // Broadcast: once the camera is live, push small webcam snapshots to the server so
+  // viewers on other accounts actually SEE us (frame relay, ~3 fps). Real on-chain
+  // payments flow separately; this is just the video transport for the demo.
+  useEffect(() => {
+    if (camState !== "on") return;
+    const canvas = document.createElement("canvas"); canvas.width = 480; canvas.height = 270;
+    const ctx = canvas.getContext("2d");
+    const id = setInterval(() => {
+      const v = cam.current;
+      if (!v || !ctx || v.videoWidth === 0) return;
+      try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); void pushLiveFrame(clip.id, canvas.toDataURL("image/jpeg", 0.5)); } catch { /* drawImage can throw before first frame */ }
+    }, 340);
+    return () => clearInterval(id);
+  }, [camState, clip.id]);
   async function end(then: () => void) { setEnding(true); await stopLive(clip.id, me.id); then(); }
   return (
     <div className="page">
@@ -434,7 +475,7 @@ function HostLiveView({ clip, me, onBack, onEnded }: { clip: Clip; me: DemoUser;
         </div>
         <div className="panel">
           <h3><span className="livedot on" /> your live stream</h3>
-          <LiveMeter clipId={clip.id} />
+          <LiveMeter clipId={clip.id} asHost />
           <div style={{ marginTop: 12 }}><LiveChat clipId={clip.id} me={me} /></div>
           <button className="btn" style={{ width: "100%", marginTop: 12, background: "var(--out)", borderColor: "var(--out)" }} onClick={() => end(onEnded)} disabled={ending}>{ending ? "ending…" : "■ End stream"}</button>
         </div>
@@ -1024,7 +1065,9 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
               }
             }}
           >
-            {clip.hasVideo
+            {clip.live
+              ? <LiveFrameImg clipId={clip.id} blurred={outOfFunds} />
+              : clip.hasVideo
               ? <video ref={video} src={videoSrc(clip.id)} preload="metadata" autoPlay muted loop playsInline style={{ opacity: phase === "stopped" ? 0.4 : 1, filter: outOfFunds ? "blur(16px) brightness(.45)" : undefined, transition: "filter .35s ease" }} />
               : <span className="emoji" style={{ opacity: live ? 1 : 0.5 }}>{clip.thumb ?? "🎬"}</span>}
             <button className="fs-open" onClick={openFullscreen} title="fullscreen" aria-label="Open fullscreen">⛶</button>
@@ -1044,13 +1087,13 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
             {!streamEnded && phase === "opening" && <span className="player-connecting">⚡ playing now · settling payment on-chain…</span>}
             {!streamEnded && phase === "stopped" && <div className="ov">■ Stopped — click the video to watch again.</div>}
           </div>
-          <PopularityTimeline
+          {!clip.live && <PopularityTimeline
             videoDuration={videoDuration || clip.durationSec}
             currentTime={currentTime}
             bufferedTime={bufferedTime}
             popularityBySecond={popularity}
             onSeek={seekVideo}
-          />
+          />}
           <div className="w-title">{clip.title}</div>
           <div className="w-chan">
             <div className="a">{clip.thumb ?? "🎬"}</div>

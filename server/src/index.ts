@@ -813,6 +813,7 @@ function accrueWatch(clipId: string, viewerId: string): number {
   if (amt > 0) {
     ledger.record({ fromAddr: viewer.address, toAddr: w.creatorAddr, fromLabel: viewer.name, toLabel: clip.creator, amount: amt, contentId: clipId });
     w.owedRaw += parseUnits(amt.toFixed(6), TOKEN_DECIMALS);
+    if (clip.live) live.liveAddPaid(clipId, amt); // feed the host's live income meter
   }
   return Number(w.owedRaw) / 10 ** TOKEN_DECIMALS;
 }
@@ -854,6 +855,7 @@ app.post("/watch-tick", async (c) => {
   const clip = getClip(clipId); const viewer = getUser(viewerId);
   if (!clip || !viewer) return c.json({ ok: false }, 400);
   if (viewer.id === clip.ownerId) return c.json({ ok: true, free: true, spentUsd: 0 }); // creators preview free
+  if (clip.live) live.liveBeat(clipId, viewerId); // count this viewer in the host's live meter
   if (b?.visible === false) return c.json({ ok: true, paused: true });
   if (b?.pause === true) return c.json({ ok: true, paused: true }); // client freeze (demo limited-funds) — keep session alive, don't charge
   // Out of funds → the UI blurs the video + the agent's ad takes over (earn it back).
@@ -1281,6 +1283,24 @@ app.get("/live/:id/stats", (c) => {
     return c.json({ live: false, ended: true, viewers: 0, perSecUsd: 0, totalUsd: 0, applause: 0 });
   }
   return c.json({ ...live.liveStats(clip.id, Number(clip.pricePerSec)), live: true });
+});
+// ── Live camera frame relay ("poor-man's stream"): the host posts ~3 small JPEG
+// snapshots/sec of their webcam; viewers poll the latest. Robust over plain HTTP /
+// the tunnel — no WebRTC/TURN needed for the demo. Frames go stale after 8s so when
+// the host leaves, viewers stop seeing them. ──────────────────────────────────────
+const liveFrames = new Map<string, { frame: string; ts: number }>();
+app.post("/live/:id/frame", async (c) => {
+  const id = c.req.param("id");
+  const b = await c.req.json().catch(() => ({}));
+  const frame = String(b?.frame ?? "");
+  if (!frame.startsWith("data:image/") || frame.length > 600_000) return c.json({ ok: false }, 400);
+  liveFrames.set(id, { frame, ts: Date.now() });
+  return c.json({ ok: true });
+});
+app.get("/live/:id/frame", (c) => {
+  const f = liveFrames.get(c.req.param("id"));
+  if (!f || Date.now() - f.ts > 8000) return c.json({ frame: null });
+  return c.json({ frame: f.frame, ts: f.ts });
 });
 // Background sweep: a live stream only exists while its host is present. End (remove)
 // any live clip whose creator has left — even with no viewers polling — so stale live
