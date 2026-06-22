@@ -17,6 +17,10 @@
   <code>Tempo testnet</code> · <code>pathUSD (TIP-20)</code> · <code>verified on-chain</code> · <code>agent — no API key</code> · <b>⚠️ TESTNET ONLY</b>
 </p>
 
+<p align="center">
+  <b>🏆 Winner — Futura × Tempo Hackathon 2026</b>
+</p>
+
 ---
 
 ## The idea in one line
@@ -138,4 +142,5 @@ pnpm agent:curator    -- --budget 0.05   # pays creators, earns from ads, net-aw
 
 ---
 
-<p align="center"><b>⚠️ TESTNET ONLY — never real funds.</b> Built for the MPP Hackathon on Tempo.</p>
+<p align="center"><b>🏆 Winner — Futura × Tempo Hackathon 2026.</b><br/>
+<b>⚠️ TESTNET ONLY — never real funds.</b> Built for the MPP Hackathon on Tempo.</p>
