@@ -15,7 +15,12 @@ import type { SecondPopularity } from "./video-timeline";
 
 export type { SocialComment };
 
-/** Link a real on-chain tx / address to the Tempo block explorer + the Tempo app. */
+/** Link a real on-chain address to the Tempo block explorer.
+ *  NOTE: the Tempo testnet explorer currently has NO per-transaction page — /tx/<hash>,
+ *  /receipt/<hash> and /transaction/<hash> all 404 (even for freshly-mined txs), only
+ *  /address/<addr> renders. So on-chain "receipt" links point at the involved wallet's
+ *  address page (where the tx shows in its history). `explorerTxUrl` is kept for the day
+ *  Tempo ships tx pages, but is intentionally UNUSED by the UI right now. */
 export const explorerTxUrl = (tx: string) => `${TEMPO_EXPLORER_URL}/tx/${tx}`;
 export const explorerAddressUrl = (addr: string) => `${TEMPO_EXPLORER_URL}/address/${addr}`;
 export const tempoAppUrl = TEMPO_APP_URL;

@@ -17,7 +17,7 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, pushLiveFrame, fetchLiveFrame, explorerTxUrl, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, pushLiveFrame, fetchLiveFrame, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -786,7 +786,7 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active, outOfFunds }: { clip: 
         <div className="muted" style={{ fontSize: 12 }}>matched <b>{ad.title ?? ad.advertiser}</b> — {reason}</div>
         <div className="bignum in" style={{ fontSize: 26 }}>+ {usd(earned)}</div>
         <div className="muted" style={{ fontSize: 11.5 }}>{earning ? "💸 refilling you — paying per verified second → settled on-chain" : "🟢 standby — plays automatically to refill you when your balance runs low"}</div>
-        <a className="tx" href={lastTx ? explorerTxUrl(lastTx) : explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" style={{ marginTop: 6, display: "inline-block" }}>{lastTx ? `↗ on-chain receipt · ${lastTx.slice(0, 10)}…` : "↗ on-chain receipts (your wallet)"}</a>
+        <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={lastTx ? `tx ${lastTx} — view on Tempo explorer` : undefined} style={{ marginTop: 6, display: "inline-block" }}>{lastTx ? `↗ on-chain receipt · ${lastTx.slice(0, 10)}…` : "↗ on-chain receipts (your wallet)"}</a>
       </>) : <div className="muted" style={{ fontSize: 12.5 }}>{reason}</div>}
     </div>
   );
@@ -1178,7 +1178,7 @@ function WatchView({ clip, me, onBack, onError, onSettled, onProfile, balance, o
                 <div className="statline"><span className="k">paid to creator</span><span><b>{usd(paid)}</b>{summary.seconds != null ? ` · ${summary.seconds}s` : ""}</span></div>
                 <div className="statline"><span className="k">earned back by agent</span><span style={{ color: "var(--in)" }}>+ {usd(earned)}</span></div>
                 {summary.txHash
-                  ? <a className="tx" href={explorerTxUrl(summary.txHash)} target="_blank" rel="noreferrer" title={summary.txHash}>↗ on-chain receipt · {shortHash(summary.txHash)}</a>
+                  ? <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`tx ${summary.txHash} — view on Tempo explorer`}>↗ on-chain receipt · {shortHash(summary.txHash)}</a>
                   : <a className="tx" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer">↗ view your wallet on the explorer</a>}
               </div>
             );
@@ -2144,7 +2144,7 @@ function FlowSession({ clip, me, onBack, onError }: { clip: Clip; me: DemoUser; 
           <div className="statline"><span className="k">earned from ads</span><span style={{ color: "var(--in)" }}>+ {usd(settlement.earned)}</span></div>
           <div className="statline"><span className="k">net cost to watch</span><span><b>{settlement.earned - settlement.paid >= 0 ? "+" : "−"} {usd(Math.abs(settlement.earned - settlement.paid))}</b></span></div>
           <div className="statline"><span className="k">unused deposit refunded</span><span style={{ color: "var(--in)" }}>↩ {usd(settlement.refund)}</span></div>
-          {settlement.txHash && <div className="statline"><span className="k">settlement tx</span><a className="mono" href={explorerTxUrl(settlement.txHash)} target="_blank" rel="noreferrer">{settlement.txHash.slice(0, 12)}…↗</a></div>}
+          {settlement.txHash && <div className="statline"><span className="k">settlement tx</span><a className="mono" href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" title={`tx ${settlement.txHash} — view on Tempo explorer`}>{settlement.txHash.slice(0, 12)}…↗</a></div>}
         </div>
       )}
     </div>
@@ -2548,9 +2548,9 @@ function App() {
                         <div className="statline" style={{ marginTop: 5 }}><span className="k">escrowed on-chain</span><span><b>{usd(budget)}</b></span></div>
                         <div className="statline"><span className="k">paid to viewers</span><span>{usd(spent)}</span></div>
                         <div className="statline"><span className="k">refundable</span><span style={{ color: "var(--in)" }}>{usd(left)}</span></div>
-                        {c.escrowTx && <div className="statline"><span className="k">escrow tx</span><a href={explorerTxUrl(c.escrowTx)} target="_blank" rel="noreferrer" className="mono">{c.escrowTx.slice(0, 10)}…↗</a></div>}
-                        {c.refundTx && <div className="statline"><span className="k">refund tx</span><a href={explorerTxUrl(c.refundTx)} target="_blank" rel="noreferrer" className="mono">{c.refundTx.slice(0, 10)}…↗</a></div>}
-                        {tx?.tx && !c.escrowTx && !c.refundTx && <div className="statline"><span className="k">{tx.kind === "refund" ? "refund tx" : "escrow tx"}</span><a href={explorerTxUrl(tx.tx)} target="_blank" rel="noreferrer" className="mono">{tx.tx.slice(0, 10)}…↗</a></div>}
+                        {c.escrowTx && <div className="statline"><span className="k">escrow tx</span><a href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" className="mono" title={`tx ${c.escrowTx} — view on Tempo explorer`}>{c.escrowTx.slice(0, 10)}…↗</a></div>}
+                        {c.refundTx && <div className="statline"><span className="k">refund tx</span><a href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" className="mono" title={`tx ${c.refundTx} — view on Tempo explorer`}>{c.refundTx.slice(0, 10)}…↗</a></div>}
+                        {tx?.tx && !c.escrowTx && !c.refundTx && <div className="statline"><span className="k">{tx.kind === "refund" ? "refund tx" : "escrow tx"}</span><a href={explorerAddressUrl(me.address)} target="_blank" rel="noreferrer" className="mono" title={`tx ${tx.tx} — view on Tempo explorer`}>{tx.tx.slice(0, 10)}…↗</a></div>}
                       </div>
                       <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", minWidth: 150 }}>
                         <span className={"chip " + (stopped ? "chip-bad" : funded ? "chip-ok" : "chip-bad")}>{stopped ? "■ stopped" : funded ? "✓ live · paying" : "⛔ unfunded"}</span>
