@@ -6,9 +6,10 @@ dist
 *.log
 .env
 .env.local
-server/flow.db
-server/flow.db-*
-server/uploads
+# NOTE: server/flow.db + server/uploads are intentionally shipped into the image
+# so the Railway deploy boots with the curated demo content (clips + ads + users).
+# Only the files committed to git are present in the build context, so runtime-only
+# uploads / db churn never reach the image.
 .wallets
 .vite
 web/dist
