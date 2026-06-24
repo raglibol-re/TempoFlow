@@ -43,21 +43,26 @@ export async function ensureKey(u: DemoUser): Promise<DemoUser> {
 }
 
 /**
- * Resolve the backend URL at RUNTIME so a single Vercel build can target any
- * backend (e.g. a local machine exposed via an ngrok/cloudflared tunnel) without
- * rebuilding. Precedence: `?server=<url>` query param (remembered in
- * localStorage) → previously saved value → build-time VITE_SERVER_URL → localhost
- * in local development. Deployed HTTPS sites must use a public HTTPS backend.
+ * Resolve the backend URL at RUNTIME. Precedence:
+ *   1. `?server=<url>` query param — explicit per-load override (also remembered).
+ *   2. build-time VITE_SERVER_URL — the deployed default backend. This WINS over a
+ *      previously saved value, so a stale localStorage entry (e.g. an old dev
+ *      tunnel) can never shadow the production backend baked into the build.
+ *   3. previously saved localStorage value (legacy / "bring your own backend").
+ *   4. localhost in local development.
+ * Deployed HTTPS sites must use a public HTTPS backend.
  */
 function resolveServerUrl(): string {
+  const envUrl = (import.meta as any).env?.VITE_SERVER_URL;
+  const baked = envUrl ? String(envUrl).replace(/\/+$/, "") : "";
   try {
     const qp = new URLSearchParams(window.location.search).get("server");
     if (qp) { localStorage.setItem("flow.serverUrl", qp); return qp.replace(/\/+$/, ""); }
+    if (baked) return baked;
     const saved = localStorage.getItem("flow.serverUrl");
     if (saved) return saved.replace(/\/+$/, "");
   } catch { /* non-browser context — fall through */ }
-  const envUrl = (import.meta as any).env?.VITE_SERVER_URL;
-  if (envUrl) return String(envUrl).replace(/\/+$/, "");
+  if (baked) return baked;
   if (typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
     return "http://localhost:3000";
   }
