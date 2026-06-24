@@ -47,6 +47,25 @@ export async function ensureKey(u: DemoUser): Promise<DemoUser> {
   return u;
 }
 
+/** Make sure the SAVED account still exists on the CURRENT backend. The server DB can
+ *  reset (e.g. a redeploy with no persistent volume), which strands a saved login as
+ *  "unknown user" on every call (fund, watch, …). Re-register idempotently BY ADDRESS:
+ *  if the account was wiped it's recreated with the SAME wallet (address + key, so the
+ *  on-chain balance is intact); if it already exists the server just returns it. Returns
+ *  the canonical user to persist. */
+export async function ensureAccount(u: DemoUser): Promise<DemoUser> {
+  const hu = await ensureKey(u); // pull the signing key back first (app accounts keep it server-side)
+  try {
+    const reg = await jpost("/users", {
+      address: hu.address,
+      key: isValidKey(hu.key) ? hu.key : undefined,
+      name: hu.name, handle: hu.handle, role: hu.role,
+    }, "restore account");
+    const su = reg.user;
+    return { ...hu, id: su.id, name: su.name ?? hu.name, role: su.role ?? hu.role, handle: su.handle ?? hu.handle, avatar: su.avatar ?? hu.avatar };
+  } catch { return hu; }
+}
+
 /**
  * Resolve the backend URL at RUNTIME. Precedence:
  *   1. `?server=<url>` query param — explicit per-load override (also remembered).

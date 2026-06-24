@@ -17,7 +17,7 @@ import {
   fundUser, resetNet, sendHeartbeat, runAd, uploadAd, fundCampaign, stopCampaign, fetchEscrowAddress, uploadClip, setClipPrice, watchClip,
   videoSrc, connectTempoAccount, registerAppAccount, syncCheckoutSession, createCampaign, openAttentionSession, answerChallenge, stopAd,
   fetchProfile, updateProfile, uploadProfilePic, picSrc, followCreator, unfollowCreator,
-  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, pushLiveFrame, fetchLiveFrame, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, isValidKey, updateClipMeta, deleteClip,
+  sendTip, runAuction, matchAd, fetchAdReceipts, askCreator, fetchGoals, createGoal, pledgeGoal, goLive, stopLive, cheerLive, fetchLiveStats, liveHostBeat, endLiveBeacon, pushLiveFrame, fetchLiveFrame, explorerAddressUrl, tempoAppUrl, exportPrivateKey, ensureKey, ensureAccount, updateClipMeta, deleteClip,
   viewClip, toggleLike, fetchSocial, fetchVideoPopularity, postComment, fetchLiveChat, postLiveChat, type SocialComment,
   SERVER_CONFIGURED, saveServerUrl,
   type DemoUser, type Tick, type CloseSummary, type WatchHandle, type NetSnapshot, type AttentionChallenge,
@@ -722,6 +722,9 @@ const MAX_AD_S = 12;   // anti-stuck: the refill ad never runs longer than this
  *  self-financing feed, run by a machine: no human chooses the ad, no LLM key needed. */
 function AdAgentPanel({ clip, me, onEarned, onAd, active, outOfFunds }: { clip: Clip; me: DemoUser; onEarned: (usd: number) => void; onAd?: (ad: Campaign | null) => void; active: boolean; outOfFunds: boolean }) {
   const [ad, setAd] = useState<Campaign | null>(null);
+  // Ads whose funded budget ran out this session — excluded so the agent ROTATES to the
+  // next funded ad instead of stalling on an empty one (keeps refilling uninterrupted).
+  const [spentAds, setSpentAds] = useState<string[]>([]);
   const [reason, setReason] = useState("reading your interests…");
   const [earned, setEarned] = useState(0);
   const [lastTx, setLastTx] = useState<string | undefined>(undefined);
@@ -740,11 +743,15 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active, outOfFunds }: { clip: 
   const earning = !!ad && active && visible;
 
   // The agent's decision: match an ad to this clip's interests.
+  useEffect(() => { setSpentAds([]); }, [clip.id]); // fresh ad pool per clip
   useEffect(() => {
     let on = true;
-    matchAd(clip.tags ?? []).then((m) => { if (on) { setAd(m.match); onAd?.(m.match); setReason(m.match ? m.reason : "no funded ad is bidding right now"); } });
+    matchAd(clip.tags ?? [], spentAds).then((m) => { if (on) {
+      setAd(m.match); onAd?.(m.match);
+      setReason(m.match ? m.reason : (spentAds.length ? "every matching ad is out of budget right now" : "no funded ad is bidding right now"));
+    } });
     return () => { on = false; };
-  }, [clip.id]);
+  }, [clip.id, spentAds]);
   useEffect(() => { const f = () => setVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", f); f(); return () => document.removeEventListener("visibilitychange", f); }, []);
   useEffect(() => { const el = box.current; if (!el || typeof IntersectionObserver === "undefined") return; const io = new IntersectionObserver(([e]) => setOnScreen(!!e && e.isIntersecting && e.intersectionRatio > 0.25), { threshold: [0, 0.25, 1] }); io.observe(el); return () => io.disconnect(); }, [ad?.id]);
   // EARNINGS POLL — runs the whole time you're watching so the +earned counter is
@@ -765,11 +772,20 @@ function AdAgentPanel({ clip, me, onEarned, onAd, active, outOfFunds }: { clip: 
   // just sits in standby (no session, no payout) — nothing plays next to the content.
   useEffect(() => {
     if (!ad || !active) return;
-    let alive = true;
-    openAttentionSession(ad.id, me.id).then((t) => { if (alive) token.current = t; });
-    const beat = () => { void sendHeartbeat(ad.id, me.id, token.current, { visible: visRef.current, playing: true, onScreen: true }); };
-    beat(); const beatId = setInterval(beat, 1000);
-    return () => { alive = false; clearInterval(beatId); stopAd(ad.id, me.id); };
+    let alive = true; let dry = 0;
+    const adId = ad.id;
+    openAttentionSession(adId, me.id).then((t) => { if (alive) token.current = t; });
+    const beat = async () => {
+      const res = await sendHeartbeat(adId, me.id, token.current, { visible: visRef.current, playing: true, onScreen: true });
+      if (!alive) return;
+      // Budget exhausted → the server stops paying ("unfunded"). After two confirming beats,
+      // retire this ad and rotate to the next funded one so refilling never stalls.
+      if (res && res.ok === false && res.reason === "unfunded") {
+        if (++dry >= 2) setSpentAds((s) => (s.includes(adId) ? s : [...s, adId]));
+      } else dry = 0;
+    };
+    void beat(); const beatId = setInterval(beat, 1000);
+    return () => { alive = false; clearInterval(beatId); stopAd(adId, me.id); };
   }, [ad?.id, me.id, active]);
   // The sidebar ad is a paused STANDBY preview during normal watching; it only plays while
   // you're out of funds (mirroring the takeover that fills the player to refill you).
@@ -2227,8 +2243,11 @@ function App() {
       const saved = localStorage.getItem("tempoflow-me");
       if (saved) {
         const u = JSON.parse(saved) as DemoUser;
-        setMe(u); // optimistic; hydrate the signing key if missing (app accounts)
-        if (!isValidKey(u.key)) ensureKey(u).then((hu) => { setMe(hu); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); }).catch(() => {});
+        setMe(u); // optimistic
+        // Re-register against the CURRENT backend so a saved login keeps working after the
+        // server DB resets (redeploy w/ no volume → otherwise "unknown user" on every call).
+        // Idempotent by address; recreates the same wallet if it was wiped.
+        ensureAccount(u).then((hu) => { setMe(hu); localStorage.setItem("tempoflow-me", JSON.stringify(hu)); }).catch(() => {});
       }
     } catch {}
     const payment = new URLSearchParams(window.location.search).get("payment");
