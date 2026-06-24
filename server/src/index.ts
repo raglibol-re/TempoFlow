@@ -875,6 +875,7 @@ async function settleWatch(minUsd = 0.003) {
         const tx = await wallet.writeContract({ address: FLOW_CURRENCY, abi: ERC20_TRANSFER_ABI, functionName: "transfer", args: [w.creatorAddr, delta], chain: tempoTestnet as any });
         const list = watchReceipts.get(w.viewerId) ?? []; list.unshift({ txHash: tx as string, amountUsd: Number(delta) / 10 ** TOKEN_DECIMALS, ts: Date.now() });
         watchReceipts.set(w.viewerId, list.slice(0, 25));
+        balCache.delete(w.viewerId); // settled on-chain → drop the stale cached balance so the next tick reads the real (now lower) balance
         console.log(`[watch-pay] ${w.viewerName} → ${w.creatorName} +${Number(delta) / 10 ** TOKEN_DECIMALS} pathUSD tx ${tx}`);
       } catch (err) { w.settledRaw -= delta; console.error("[watch-pay] settle failed:", (err as Error).message); }
     }
@@ -891,6 +892,14 @@ async function viewerBalanceCached(id: string, addr: `0x${string}`): Promise<num
   balCache.set(id, { bal, ts: Date.now() });
   return bal;
 }
+/** USD already charged to this viewer this session but NOT yet settled on-chain.
+ *  Settlement batches every 7s, so the cached on-chain balance lags these in-flight
+ *  charges — subtract them to know what's truly still spendable RIGHT NOW. */
+function viewerUnsettledUsd(viewerId: string): number {
+  let raw = 0n;
+  for (const w of watchPays.values()) if (w.viewerId === viewerId) raw += w.owedRaw - w.settledRaw;
+  return Number(raw) / 10 ** TOKEN_DECIMALS;
+}
 /** One watched second → charge the viewer for the creator. Returns the live spent. */
 app.post("/watch-tick", async (c) => {
   const b = await c.req.json().catch(() => ({}));
@@ -902,7 +911,12 @@ app.post("/watch-tick", async (c) => {
   if (b?.visible === false) return c.json({ ok: true, paused: true });
   if (b?.pause === true) return c.json({ ok: true, paused: true }); // client freeze (demo limited-funds) — keep session alive, don't charge
   // Out of funds → the UI blurs the video + the agent's ad takes over (earn it back).
-  if (await viewerBalanceCached(viewer.id, viewer.address) < Number(clip.pricePerSec)) return c.json({ ok: true, outOfFunds: true });
+  // Subtract in-flight (accrued-but-unsettled) charges from the cached balance: this trips
+  // within ONE tick of the wallet being exhausted (no settle-interval lag → the video stops
+  // ~instantly) AND guarantees we never accrue more than the wallet can pay, so settleWatch
+  // never broadcasts an unaffordable / "empty" transfer.
+  const spendable = (await viewerBalanceCached(viewer.id, viewer.address)) - viewerUnsettledUsd(viewer.id);
+  if (spendable < Number(clip.pricePerSec)) return c.json({ ok: true, outOfFunds: true });
   const spentUsd = accrueWatch(clipId, viewerId);
   return c.json({ ok: true, spentUsd });
 });
